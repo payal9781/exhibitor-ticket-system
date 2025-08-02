@@ -1,69 +1,71 @@
-const asyncHandler = require('../utils/asyncHandler');
-const { response } = require('../utils/apiResponse');
-const { models } = require('../models/z-index');
+const { successResponse, errorResponse } = require('../utils/apiResponse');
+const asyncHandler = require('express-async-handler');
+const Event = require('../models/Event');
+const UserEventSlot = require('../models/UserEventSlot');
+const generateSlots = require('../utils/slotGenerator');
 
 const createEvent = asyncHandler(async (req, res) => {
-  const { title, description, fromDate, toDate, startTime, endTime, location } = req.body;
-  const organizerId = req.user._id;
-
-  const event = await models.Event.create({
-    organizerId,
-    title,
-    description,
-    fromDate,
-    toDate,
-    startTime,
-    endTime,
-    location
-  });
-
-  return response.create('Event created successfully', event, res);
-});
-
-const updateEvent = asyncHandler(async (req, res) => {
-  const { eventId } = req.params;
-  const updateData = req.body;
-
-  const event = await models.Event.findOneAndUpdate(
-    { _id: eventId, organizerId: req.user._id },
-    updateData,
-    { new: true }
-  );
-
-  if (!event) {
-    return response.notFound('Event not found or unauthorized', res);
-  }
-
-  return response.success('Event updated successfully', event, res);
-});
-
-const deleteEvent = asyncHandler(async (req, res) => {
-  const { eventId } = req.params;
-  const event = await models.Event.findOneAndUpdate(
-    { _id: eventId, organizerId: req.user._id },
-    { isDeleted: true },
-    { new: true }
-  );
-
-  if (!event) {
-    return response.notFound('Event not found or unauthorized', res);
-  }
-
-  return response.success('Event deleted successfully', {}, res);
+  const event = new Event({ ...req.body, organizerId: req.user._id });
+  await event.save();
+  successResponse(res, event, 201);
 });
 
 const getEvents = asyncHandler(async (req, res) => {
   const { organizerId } = req.query;
-  const query = {};
-  if (req.user.type === 'organizer') {
-    query.organizerId = req.user._id;
-  } else if (organizerId) {
-    query.organizerId = organizerId;
-  }
-  query.isDeleted = false;
-
-  const events = await models.Event.find(query).populate('organizerId');
-  return response.success('Events retrieved successfully', events, res);
+  let query = {};
+  if (req.user.type === 'organizer') query.organizerId = req.user._id;
+  if (req.user.type === 'superAdmin' && organizerId) query.organizerId = organizerId;
+  const events = await Event.find(query);
+  successResponse(res, events);
 });
 
-module.exports = { createEvent, updateEvent, deleteEvent, getEvents };
+const getEventById = asyncHandler(async (req, res) => {
+  const event = await Event.findById(req.params.id);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
+  successResponse(res, event);
+});
+
+const updateEvent = asyncHandler(async (req, res) => {
+  const event = await Event.findById(req.params.id);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
+  Object.assign(event, req.body);
+  await event.save();
+  successResponse(res, event);
+});
+
+const deleteEvent = asyncHandler(async (req, res) => {
+  const event = await Event.findById(req.params.id);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
+  event.isDeleted = true;
+  await event.save();
+  successResponse(res, { message: 'Event deleted' });
+});
+
+// Register user for event (exhibitor/visitor) and generate slots
+const registerForEvent = asyncHandler(async (req, res) => {
+  const { eventId, userId, userType } = req.body; // For admin/organizer to add, or self-register
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (userType === 'exhibitor') {
+    if (!event.exhibitor.includes(userId)) event.exhibitor.push(userId);
+  } else if (userType === 'visitor') {
+    if (!event.visitor.includes(userId)) event.visitor.push(userId);
+  } else return errorResponse(res, 'Invalid user type');
+  await event.save();
+
+  // Generate slots
+  const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+  const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
+  const userSlot = new UserEventSlot({ userId, userType, eventId, slots });
+  await userSlot.save();
+
+  // Generate QR
+  const qrData = { eventId, userId, role: userType, startDate: event.fromDate, endDate: event.toDate };
+  const qrCode = await require('../utils/qrGenerator')(qrData);
+  successResponse(res, { message: 'Registered successfully', qrCode });
+});
+
+module.exports = { createEvent, getEvents, getEventById, updateEvent, deleteEvent, registerForEvent };

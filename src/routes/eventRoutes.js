@@ -1,14 +1,14 @@
-const { Router } = require('express');
-const { createEvent, updateEvent, deleteEvent, getEvents } = require('../controllers/eventController');
-const { authMiddleware } = require('../middleware/authMiddleware');
-const { validator } = require('../utils/validator');
-const { create: createEventValidator, update: updateEventValidator } = require('../validators/eventValidator');
+const express = require('express');
+const router = express.Router();
+const authMiddleware = require('../middleware/authMiddleware');
+const { createEvent, getEvents, getEventById, updateEvent, deleteEvent, registerForEvent } = require('../controllers/eventController');
+const uploadMiddleware = require('../middleware/uploadMiddleware');
 
-const router = Router();
-
-router.post('/', authMiddleware(['organizer', 'superadmin']), validator(createEventValidator), createEvent);
-router.put('/:eventId', authMiddleware(['organizer', 'superadmin']), validator(updateEventValidator), updateEvent);
-router.delete('/:eventId', authMiddleware(['organizer', 'superadmin']), deleteEvent);
-router.get('/', authMiddleware(['organizer', 'superadmin', 'exhibitor', 'visitor']), getEvents);
+router.post('/create', authMiddleware(['organizer', 'superAdmin']), uploadMiddleware('media'), createEvent);
+router.post('/list', authMiddleware(['organizer', 'superAdmin', 'exhibitor', 'visitor']), getEvents);
+router.post('/get', authMiddleware(['organizer', 'superAdmin', 'exhibitor', 'visitor']), getEventById);
+router.post('/update', authMiddleware(['organizer', 'superAdmin']), updateEvent);
+router.post('/delete', authMiddleware(['organizer', 'superAdmin']), deleteEvent);
+router.post('/register', authMiddleware(['exhibitor', 'visitor', 'organizer', 'superAdmin']), registerForEvent);
 
 module.exports = router;

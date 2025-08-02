@@ -1,10 +1,9 @@
 // src/models/Exhibitor.js
 const mongoose = require('mongoose');
-
+const jwt = require('jsonwebtoken');
 const exhibitorSchema = new mongoose.Schema({
-  // name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  phone: { type: String, unique: true, sparse: true },
+  email: { type: String, unique: true },
+  phone: { type: String, unique: true, sparse: true, required: true },
   companyName: { type: String },
   profileImage: { type: String },
   coverImage: { type: String },
@@ -15,20 +14,10 @@ const exhibitorSchema = new mongoose.Schema({
   location: { type: String },
   socialMediaLinks: { type: Object },
   isActive: { type: Boolean, default: false },
-  isDeleted: { type: Boolean, default: false }
-
+  isDeleted: { type: Boolean, default: false },
+  otp: { type: String },
+  otpExpires: { type: Date }
 }, { timestamps: true });
-
-exhibitorSchema.pre('save', async function (next) {
-  if (this.isModified('password')) {
-    this.password = await bcrypt.hash(this.password, 10);
-  }
-  next();
-});
-
-exhibitorSchema.methods.isPasswordCorrect = async function (password) {
-    return await bcrypt.compare(password, this.password);
-};
 exhibitorSchema.methods.generateAccessToken = function () {
   return jwt.sign(
     {
@@ -43,5 +32,4 @@ exhibitorSchema.methods.generateAccessToken = function () {
     }
   );
 };
-
 module.exports = mongoose.model('Exhibitor', exhibitorSchema);

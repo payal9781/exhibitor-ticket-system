@@ -1,18 +1,12 @@
-// src/models/Event.js
 const mongoose = require('mongoose');
-
-const eventSchema = new mongoose.Schema({
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
-    slot: { type: String },
-    slotMakerId: { type: Schema.Types.ObjectId, ref: 'userModel' },
-    userId: { type: Schema.Types.ObjectId, refPath: 'userModel', required: true },
-    userModel: { type: String, enum: ['Visitor', 'Exhibitor'], required: true },
-    date: { type: String },
-    status: {
-        type: String,
-        enum: ['pending', 'approved', 'rejected'],
-        default: 'pending'
-    }
+const meetingSchema = new mongoose.Schema({
+  eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
+  requesterId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  requesterType: { type: String, enum: ['Visitor', 'Exhibitor'], required: true },
+  requesteeId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  requesteeType: { type: String, enum: ['Visitor', 'Exhibitor'], required: true },
+  slotStart: { type: Date, required: true },
+  slotEnd: { type: Date, required: true },
+  status: { type: String, enum: ['pending', 'accepted', 'rejected', 'cancelled'], default: 'pending' },
 }, { timestamps: true });
-
-module.exports = mongoose.model('Event', eventSchema);
+module.exports = mongoose.model('Meeting', meetingSchema);
