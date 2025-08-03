@@ -4,6 +4,8 @@ const Exhibitor = require('../models/Exhibitor');
 const Event = require('../models/Event');
 const Organizer = require('../models/Organizer');
 const Visitor = require('../models/Visitor');
+const UserEventSlot = require('../models/UserEventSlot');
+const Meeting = require('../models/Meeting');
 
 const createExhibitor = asyncHandler(async (req, res) => {
   const exhibitor = new Exhibitor(req.body);
@@ -11,7 +13,7 @@ const createExhibitor = asyncHandler(async (req, res) => {
   if(isExists && !isExists?.isDeleted && isExists?.isActive){
      return errorResponse(res,'Email already exists',409)
   }
-  if(isExists && isExists?.isDeleted && !isExists?.isActive){
+  if(isExists && isExists?.isDeleted){
     return errorResponse(res,'contact to adminitrator',409)
   }
   await exhibitor.save();
@@ -140,6 +142,414 @@ const checkOutExhibitor = asyncHandler(async (req, res) => {
   successResponse(res, exhibitor);
 });
 
+// ===== MOBILE APP APIs FOR EXHIBITORS =====
+
+// Get exhibitor profile (for mobile app)
+const getMyProfile = asyncHandler(async (req, res) => {
+  const exhibitor = await Exhibitor.findById(req.user._id).select('-password');
+  if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
+  successResponse(res, exhibitor);
+});
+
+// Update exhibitor profile (for mobile app)
+const updateMyProfile = asyncHandler(async (req, res) => {
+  const { companyName, email, phone, bio, Sector, location, website } = req.body;
+  
+  const exhibitor = await Exhibitor.findById(req.user._id);
+  if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
+
+  // Check if email or phone already exists (excluding current user)
+  if (email && email !== exhibitor.email) {
+    const existingEmail = await Exhibitor.findOne({ email, _id: { $ne: req.user._id } });
+    if (existingEmail) return errorResponse(res, 'Email already exists', 400);
+  }
+
+  if (phone && phone !== exhibitor.phone) {
+    const existingPhone = await Exhibitor.findOne({ phone, _id: { $ne: req.user._id } });
+    if (existingPhone) return errorResponse(res, 'Phone number already exists', 400);
+  }
+
+  // Update fields
+  if (companyName) exhibitor.companyName = companyName;
+  if (email) exhibitor.email = email;
+  if (phone) exhibitor.phone = phone;
+  if (bio) exhibitor.bio = bio;
+  if (Sector) exhibitor.Sector = Sector;
+  if (location) exhibitor.location = location;
+  if (website) exhibitor.website = website;
+
+  await exhibitor.save();
+  
+  const updatedExhibitor = await Exhibitor.findById(req.user._id).select('-password');
+  successResponse(res, updatedExhibitor);
+});
+
+// Get exhibitor's registered events (for mobile app)
+const getMyEvents = asyncHandler(async (req, res) => {
+  const currentDate = new Date();
+  const { includeEnded = false } = req.body;
+
+  let query = {
+    isDeleted: false,
+    'exhibitor.userId': req.user._id
+  };
+
+  // Only include active events unless specifically requested
+  if (!includeEnded) {
+    query.isActive = true;
+    query.toDate = { $gte: currentDate };
+  }
+
+  const events = await Event.find(query)
+    .populate('organizerId', 'name email companyName')
+    .sort({ fromDate: 1 });
+
+  // Add status and QR code for each event
+  const eventsWithDetails = events.map(event => {
+    const eventObj = event.toObject();
+    const exhibitorData = event.exhibitor.find(ex => ex.userId.toString() === req.user._id);
+    
+    // Add status
+    const eventEndDate = new Date(event.toDate);
+    if (eventEndDate < currentDate) {
+      eventObj.status = 'ended';
+      eventObj.statusColor = 'red';
+    } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+      eventObj.status = 'ongoing';
+      eventObj.statusColor = 'orange';
+    } else {
+      eventObj.status = 'upcoming';
+      eventObj.statusColor = 'green';
+    }
+
+    // Add QR code and registration details
+    eventObj.myQRCode = exhibitorData?.qrCode;
+    eventObj.registeredAt = exhibitorData?.registeredAt;
+
+    return eventObj;
+  });
+
+  successResponse(res, eventsWithDetails);
+});
+
+// Get exhibitor's event statistics (for mobile app)
+const getMyEventStats = asyncHandler(async (req, res) => {
+  const currentDate = new Date();
+  
+  const events = await Event.find({
+    isDeleted: false,
+    'exhibitor.userId': req.user._id
+  });
+
+  const stats = {
+    totalEvents: events.length,
+    upcomingEvents: 0,
+    ongoingEvents: 0,
+    endedEvents: 0,
+    activeEvents: 0,
+    totalMeetings: 0
+  };
+
+  events.forEach(event => {
+    const eventStartDate = new Date(event.fromDate);
+    const eventEndDate = new Date(event.toDate);
+    
+    if (event.isActive) {
+      stats.activeEvents++;
+    }
+    
+    if (eventEndDate < currentDate) {
+      stats.endedEvents++;
+    } else if (eventStartDate <= currentDate && eventEndDate >= currentDate) {
+      stats.ongoingEvents++;
+    } else {
+      stats.upcomingEvents++;
+    }
+  });
+
+  // Get total meetings
+  const eventIds = events.map(event => event._id);
+  const totalMeetings = await Meeting.countDocuments({
+    eventId: { $in: eventIds },
+    $or: [
+      { requesterId: req.user._id },
+      { requestedId: req.user._id }
+    ],
+    status: 'accepted'
+  });
+
+  stats.totalMeetings = totalMeetings;
+  successResponse(res, stats);
+});
+
+// Get exhibitor's slots for a specific event (for mobile app)
+const getMyEventSlots = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  
+  if (!eventId) return errorResponse(res, 'Event ID is required', 400);
+
+  // Verify exhibitor is registered for this event
+  const event = await Event.findOne({
+    _id: eventId,
+    isDeleted: false,
+    isActive: true,
+    'exhibitor.userId': req.user._id
+  });
+
+  if (!event) return errorResponse(res, 'Event not found or not registered', 404);
+
+  // Get slots
+  const userSlots = await UserEventSlot.findOne({
+    eventId,
+    userId: req.user._id,
+    userType: 'exhibitor'
+  });
+
+  if (!userSlots) {
+    return successResponse(res, {
+      event: {
+        _id: event._id,
+        title: event.title,
+        fromDate: event.fromDate,
+        toDate: event.toDate,
+        location: event.location
+      },
+      slotsByDate: {},
+      statusCounts: { available: 0, requested: 0, booked: 0 },
+      showSlots: false,
+      totalSlots: 0
+    });
+  }
+
+  const slots = userSlots.slots.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+  // Group slots by date and status
+  const slotsByDate = {};
+  const statusCounts = { available: 0, requested: 0, booked: 0 };
+
+  slots.forEach(slot => {
+    const date = slot.start.toISOString().split('T')[0];
+    if (!slotsByDate[date]) {
+      slotsByDate[date] = { available: [], requested: [], booked: [] };
+    }
+
+    const slotObj = {
+      _id: slot._id,
+      start: slot.start,
+      end: slot.end,
+      status: slot.status,
+      color: slot.status === 'available' ? 'green' : slot.status === 'requested' ? 'yellow' : 'red',
+      isAvailable: slot.status === 'available',
+      isPending: slot.status === 'requested',
+      isBooked: slot.status === 'booked'
+    };
+
+    slotsByDate[date][slot.status].push(slotObj);
+    statusCounts[slot.status]++;
+  });
+
+  // Get show slots setting
+  const showSlots = userSlots.showSlots;
+
+  successResponse(res, {
+    event: {
+      _id: event._id,
+      title: event.title,
+      fromDate: event.fromDate,
+      toDate: event.toDate,
+      location: event.location
+    },
+    slotsByDate,
+    statusCounts,
+    showSlots,
+    totalSlots: slots.length
+  });
+});
+
+// Toggle slot visibility (for mobile app)
+const toggleMySlotVisibility = asyncHandler(async (req, res) => {
+  const { eventId, showSlots } = req.body;
+  
+  if (!eventId || typeof showSlots !== 'boolean') {
+    return errorResponse(res, 'Event ID and showSlots boolean are required', 400);
+  }
+
+  // Update all slots for this user and event
+  await UserEventSlot.updateMany(
+    {
+      eventId,
+      userId: req.user._id,
+      userType: 'exhibitor'
+    },
+    { showSlots }
+  );
+
+  successResponse(res, {
+    message: `Slots ${showSlots ? 'enabled' : 'disabled'} successfully`,
+    showSlots
+  });
+});
+
+// Get exhibitor's meetings for a specific event (for mobile app)
+const getMyEventMeetings = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  
+  if (!eventId) return errorResponse(res, 'Event ID is required', 400);
+
+  const meetings = await Meeting.find({
+    eventId,
+    $or: [
+      { requesterId: req.user._id },
+      { requestedId: req.user._id }
+    ],
+    status: 'accepted'
+  })
+  .populate('requesterId', 'name companyName email phone bio Sector')
+  .populate('requestedId', 'name companyName email phone bio Sector')
+  .populate('eventId', 'title location')
+  .sort({ slotStart: 1 });
+
+  // Group meetings by date
+  const meetingsByDate = {};
+
+  meetings.forEach(meeting => {
+    const date = meeting.slotStart.toISOString().split('T')[0];
+    if (!meetingsByDate[date]) {
+      meetingsByDate[date] = [];
+    }
+
+    const otherParticipant = meeting.requesterId._id.toString() === req.user._id 
+      ? meeting.requestedId 
+      : meeting.requesterId;
+
+    const otherParticipantType = meeting.requesterType === 'exhibitor' && meeting.requesterId._id.toString() === req.user._id
+      ? meeting.requestedType
+      : meeting.requesterType === 'exhibitor' && meeting.requestedId._id.toString() === req.user._id
+      ? meeting.requesterType
+      : meeting.requestedType;
+
+    meetingsByDate[date].push({
+      _id: meeting._id,
+      slotStart: meeting.slotStart,
+      slotEnd: meeting.slotEnd,
+      eventTitle: meeting.eventId.title,
+      eventLocation: meeting.eventId.location,
+      otherParticipant: {
+        _id: otherParticipant._id,
+        name: otherParticipant.name,
+        companyName: otherParticipant.companyName,
+        email: otherParticipant.email,
+        phone: otherParticipant.phone,
+        bio: otherParticipant.bio,
+        Sector: otherParticipant.Sector
+      },
+      otherParticipantType,
+      isRequester: meeting.requesterId._id.toString() === req.user._id
+    });
+  });
+
+  successResponse(res, {
+    meetingsByDate,
+    totalMeetings: meetings.length
+  });
+});
+
+// Get pending meeting requests for exhibitor (for mobile app)
+const getMyPendingRequests = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  
+  let query = {
+    requestedId: req.user._id,
+    requestedType: 'exhibitor',
+    status: 'pending'
+  };
+
+  if (eventId) {
+    query.eventId = eventId;
+  }
+
+  const requests = await Meeting.find(query)
+    .populate('requesterId', 'name companyName email phone bio Sector')
+    .populate('eventId', 'title location')
+    .sort({ createdAt: -1 });
+
+  const formattedRequests = requests.map(request => ({
+    _id: request._id,
+    slotStart: request.slotStart,
+    slotEnd: request.slotEnd,
+    eventTitle: request.eventId.title,
+    eventLocation: request.eventId.location,
+    requester: {
+      _id: request.requesterId._id,
+      name: request.requesterId.name,
+      companyName: request.requesterId.companyName,
+      email: request.requesterId.email,
+      phone: request.requesterId.phone,
+      bio: request.requesterId.bio,
+      Sector: request.requesterId.Sector
+    },
+    requesterType: request.requesterType,
+    createdAt: request.createdAt
+  }));
+
+  successResponse(res, {
+    requests: formattedRequests,
+    totalRequests: formattedRequests.length
+  });
+});
+
+// Respond to meeting request (for mobile app)
+const respondToMeetingRequest = asyncHandler(async (req, res) => {
+  const { meetingId, status } = req.body; // status: 'accepted' or 'rejected'
+  
+  if (!meetingId || !['accepted', 'rejected'].includes(status)) {
+    return errorResponse(res, 'Meeting ID and valid status (accepted/rejected) are required', 400);
+  }
+
+  const meeting = await Meeting.findById(meetingId);
+  if (!meeting) return errorResponse(res, 'Meeting request not found', 404);
+
+  // Verify this is a request for the current user
+  if (meeting.requestedId.toString() !== req.user._id || meeting.status !== 'pending') {
+    return errorResponse(res, 'Invalid meeting request', 400);
+  }
+
+  // Update meeting status
+  meeting.status = status;
+  await meeting.save();
+
+  // Update slot status
+  const userSlot = await UserEventSlot.findOne({
+    eventId: meeting.eventId,
+    userId: req.user._id,
+    userType: 'exhibitor'
+  });
+
+  if (userSlot) {
+    const slotIndex = userSlot.slots.findIndex(s => 
+      s.start.getTime() === meeting.slotStart.getTime() && 
+      s.end.getTime() === meeting.slotEnd.getTime()
+    );
+
+    if (slotIndex !== -1) {
+      if (status === 'accepted') {
+        userSlot.slots[slotIndex].status = 'booked';
+        userSlot.slots[slotIndex].meetingId = meeting._id;
+      } else {
+        userSlot.slots[slotIndex].status = 'available';
+        userSlot.slots[slotIndex].meetingId = null;
+      }
+      await userSlot.save();
+    }
+  }
+
+  successResponse(res, {
+    message: `Meeting request ${status} successfully`,
+    meetingId: meeting._id,
+    status
+  });
+});
+
 module.exports = { 
   createExhibitor, 
   getExhibitors, 
@@ -153,5 +563,15 @@ module.exports = {
   getExhibitorStats,
   getAvailableBooths,
   checkInExhibitor,
-  checkOutExhibitor
+  checkOutExhibitor,
+  // Mobile App APIs
+  getMyProfile,
+  updateMyProfile,
+  getMyEvents,
+  getMyEventStats,
+  getMyEventSlots,
+  toggleMySlotVisibility,
+  getMyEventMeetings,
+  getMyPendingRequests,
+  respondToMeetingRequest
 };

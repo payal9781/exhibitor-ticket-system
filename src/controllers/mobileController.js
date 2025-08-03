@@ -4,6 +4,9 @@ const Event = require('../models/Event');
 const Exhibitor = require('../models/Exhibitor');
 const Visitor = require('../models/Visitor');
 const Scan = require('../models/Scan');
+const Meeting = require('../models/meeting');
+const UserEventSlot = require('../models/UserEventSlot');
+const Attendance = require('../models/Attendance');
 
 // Get total connections for exhibitor/visitor across all events
 const getTotalConnections = asyncHandler(async (req, res) => {
@@ -259,10 +262,486 @@ const getScanStatistics = asyncHandler(async (req, res) => {
   });
 });
 
+// Get available slots of scanned users for meeting requests
+const getScannedUserSlots = asyncHandler(async (req, res) => {
+  const { eventId, scannedUserId, scannedUserType } = req.body;
+  const currentUserId = req.user._id;
+  
+  if (!eventId || !scannedUserId || !scannedUserType) {
+    return errorResponse(res, 'Event ID, scanned user ID, and user type are required', 400);
+  }
+
+  // Verify that the current user has scanned this user
+  const scanRecord = await Scan.findOne({
+    scanner: currentUserId,
+    eventId,
+    scannedUser: scannedUserId
+  });
+
+  if (!scanRecord) {
+    return errorResponse(res, 'You have not scanned this user', 403);
+  }
+
+  // Get the scanned user's slots
+  const userSlots = await UserEventSlot.findOne({
+    userId: scannedUserId,
+    userType: scannedUserType,
+    eventId
+  });
+
+  if (!userSlots || !userSlots.showSlots) {
+    return errorResponse(res, 'User slots not available or hidden', 403);
+  }
+
+  // Get attendance records for the scanned user for this event
+  const attendanceRecords = await Attendance.find({
+    userId: scannedUserId,
+    eventId: eventId
+  });
+
+  // Create a set of attended dates (without time)
+  const attendedDates = new Set();
+  attendanceRecords.forEach(record => {
+    const dateKey = record.attendanceDate.toISOString().split('T')[0];
+    attendedDates.add(dateKey);
+  });
+
+  // Filter slots to only show those on attended dates
+  const availableSlots = userSlots.slots.filter(slot => {
+    const slotDateKey = slot.start.toISOString().split('T')[0];
+    return attendedDates.has(slotDateKey) && slot.status === 'available';
+  });
+  
+  // Group slots by date with color indicators
+  const slotsByDate = {};
+  const statusColors = {
+    'available': 'green',    // Available for booking
+    'requested': 'yellow',   // Pending approval
+    'booked': 'red'         // Confirmed meeting
+  };
+
+  availableSlots.forEach(slot => {
+    const dateKey = slot.start.toISOString().split('T')[0];
+    if (!slotsByDate[dateKey]) {
+      slotsByDate[dateKey] = [];
+    }
+    slotsByDate[dateKey].push({
+      _id: slot._id,
+      start: slot.start,
+      end: slot.end,
+      status: slot.status,
+      color: statusColors[slot.status] || 'gray',
+      isAvailable: slot.status === 'available'
+    });
+  });
+
+  // Get scanned user details
+  let scannedUserDetails;
+  if (scannedUserType === 'exhibitor') {
+    scannedUserDetails = await Exhibitor.findById(scannedUserId)
+      .select('companyName email phone profileImage bio Sector location');
+  } else {
+    scannedUserDetails = await Visitor.findById(scannedUserId)
+      .select('name email phone profileImage bio Sector location companyName');
+  }
+
+  successResponse(res, {
+    scannedUser: scannedUserDetails,
+    scannedUserType,
+    eventId,
+    totalAvailableSlots: availableSlots.length,
+    slotsByDate,
+    attendedDates: Array.from(attendedDates),
+    attendanceInfo: {
+      totalAttendedDays: attendedDates.size,
+      message: attendedDates.size === 0 ? 'User has not attended any event days yet' : `User has attended ${attendedDates.size} event day(s)`
+    }
+  });
+});
+
+// Send meeting request to a scanned user
+const sendMeetingRequest = asyncHandler(async (req, res) => {
+  const { eventId, requesteeId, requesteeType, slotStart, slotEnd } = req.body;
+  const requesterId = req.user._id;
+  const requesterType = req.user.type;
+
+  if (!eventId || !requesteeId || !requesteeType || !slotStart || !slotEnd) {
+    return errorResponse(res, 'All fields are required', 400);
+  }
+
+  // Verify that the requester has scanned the requestee
+  const scanRecord = await Scan.findOne({
+    scanner: requesterId,
+    eventId,
+    scannedUser: requesteeId
+  });
+
+  if (!scanRecord) {
+    return errorResponse(res, 'You have not scanned this user', 403);
+  }
+
+  // Check if the slot is still available
+  const userSlot = await UserEventSlot.findOne({
+    userId: requesteeId,
+    userType: requesteeType,
+    eventId
+  });
+
+  if (!userSlot) {
+    return errorResponse(res, 'User slots not found', 404);
+  }
+
+  const slotIndex = userSlot.slots.findIndex(s => 
+    s.start.getTime() === new Date(slotStart).getTime() && 
+    s.status === 'available'
+  );
+
+  if (slotIndex === -1) {
+    return errorResponse(res, 'Slot not available', 400);
+  }
+
+  // Create meeting request
+  const meeting = new Meeting({
+    eventId,
+    requesterId,
+    requesterType,
+    requestedId: requesteeId,
+    requestedType: requesteeType,
+    slotStart: new Date(slotStart),
+    slotEnd: new Date(slotEnd)
+  });
+  await meeting.save();
+
+  // Update slot status to requested
+  userSlot.slots[slotIndex].status = 'requested';
+  userSlot.slots[slotIndex].meetingId = meeting._id;
+  await userSlot.save();
+
+  // Get requester details for response
+  let requesterDetails;
+  if (requesterType === 'exhibitor') {
+    requesterDetails = await Exhibitor.findById(requesterId)
+      .select('companyName email phone profileImage');
+  } else {
+    requesterDetails = await Visitor.findById(requesterId)
+      .select('name email phone profileImage companyName');
+  }
+
+  successResponse(res, {
+    message: 'Meeting request sent successfully',
+    meeting: {
+      _id: meeting._id,
+      slotStart: meeting.slotStart,
+      slotEnd: meeting.slotEnd,
+      status: meeting.status,
+      requester: requesterDetails
+    }
+  }, 201);
+});
+
+// Get pending meeting requests (for the current user)
+const getPendingMeetingRequests = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  const userId = req.user._id;
+  const userType = req.user.type;
+
+  let query = {
+    requestedId: userId,
+    requestedType: userType,
+    status: 'pending'
+  };
+
+  if (eventId) {
+    query.eventId = eventId;
+  }
+
+  const pendingRequests = await Meeting.find(query)
+    .populate('eventId', 'title fromDate toDate location')
+    .sort({ createdAt: -1 });
+
+  // Get requester details for each request
+  const requestsWithDetails = await Promise.all(
+    pendingRequests.map(async (request) => {
+      let requesterDetails;
+      if (request.requesterType === 'exhibitor') {
+        requesterDetails = await Exhibitor.findById(request.requesterId)
+          .select('companyName email phone profileImage bio Sector location');
+      } else {
+        requesterDetails = await Visitor.findById(request.requesterId)
+          .select('name email phone profileImage bio Sector location companyName');
+      }
+
+      return {
+        _id: request._id,
+        eventId: request.eventId._id,
+        eventTitle: request.eventId.title,
+        eventLocation: request.eventId.location,
+        slotStart: request.slotStart,
+        slotEnd: request.slotEnd,
+        status: request.status,
+        createdAt: request.createdAt,
+        requester: requesterDetails,
+        requesterType: request.requesterType
+      };
+    })
+  );
+
+  successResponse(res, {
+    totalPendingRequests: requestsWithDetails.length,
+    requests: requestsWithDetails
+  });
+});
+
+// Accept or reject meeting request
+const respondToMeetingRequest = asyncHandler(async (req, res) => {
+  const { meetingId, status } = req.body; // status: 'accepted' or 'rejected'
+  const userId = req.user._id;
+
+  if (!meetingId || !status || !['accepted', 'rejected'].includes(status)) {
+    return errorResponse(res, 'Meeting ID and valid status (accepted/rejected) are required', 400);
+  }
+
+  const meeting = await Meeting.findById(meetingId);
+  if (!meeting) {
+    return errorResponse(res, 'Meeting not found', 404);
+  }
+
+  if (meeting.requestedId.toString() !== userId.toString()) {
+    return errorResponse(res, 'You are not authorized to respond to this meeting', 403);
+  }
+
+  if (meeting.status !== 'pending') {
+    return errorResponse(res, 'Meeting request has already been responded to', 400);
+  }
+
+  // Update meeting status
+  meeting.status = status;
+  await meeting.save();
+
+  // Update slot status
+  const userSlot = await UserEventSlot.findOne({
+    userId: meeting.requestedId,
+    userType: meeting.requestedType,
+    eventId: meeting.eventId
+  });
+
+  if (userSlot) {
+    const slotIndex = userSlot.slots.findIndex(s => 
+      s.meetingId && s.meetingId.toString() === meetingId
+    );
+
+    if (slotIndex !== -1) {
+      if (status === 'accepted') {
+        userSlot.slots[slotIndex].status = 'booked';
+      } else {
+        userSlot.slots[slotIndex].status = 'available';
+        userSlot.slots[slotIndex].meetingId = null;
+      }
+      await userSlot.save();
+    }
+  }
+
+  successResponse(res, {
+    message: `Meeting request ${status} successfully`,
+    meeting: {
+      _id: meeting._id,
+      status: meeting.status,
+      slotStart: meeting.slotStart,
+      slotEnd: meeting.slotEnd
+    }
+  });
+});
+
+// Get confirmed meetings (day-wise)
+const getConfirmedMeetings = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  const userId = req.user._id;
+  const userType = req.user.type;
+
+  let query = {
+    $or: [
+      { requesterId: userId, requesterType: userType },
+      { requestedId: userId, requestedType: userType }
+    ],
+    status: 'accepted'
+  };
+
+  if (eventId) {
+    query.eventId = eventId;
+  }
+
+  const confirmedMeetings = await Meeting.find(query)
+    .populate('eventId', 'title fromDate toDate location')
+    .sort({ slotStart: 1 });
+
+  // Get details for each meeting participant
+  const meetingsWithDetails = await Promise.all(
+    confirmedMeetings.map(async (meeting) => {
+      let otherParticipant;
+      let otherParticipantType;
+
+      if (meeting.requesterId.toString() === userId.toString()) {
+        // Current user is the requester, get requested user details
+        otherParticipantType = meeting.requestedType;
+        if (meeting.requestedType === 'exhibitor') {
+          otherParticipant = await Exhibitor.findById(meeting.requestedId)
+            .select('companyName email phone profileImage bio Sector location');
+        } else {
+          otherParticipant = await Visitor.findById(meeting.requestedId)
+            .select('name email phone profileImage bio Sector location companyName');
+        }
+      } else {
+        // Current user is the requested user, get requester details
+        otherParticipantType = meeting.requesterType;
+        if (meeting.requesterType === 'exhibitor') {
+          otherParticipant = await Exhibitor.findById(meeting.requesterId)
+            .select('companyName email phone profileImage bio Sector location');
+        } else {
+          otherParticipant = await Visitor.findById(meeting.requesterId)
+            .select('name email phone profileImage bio Sector location companyName');
+        }
+      }
+
+      return {
+        _id: meeting._id,
+        eventId: meeting.eventId._id,
+        eventTitle: meeting.eventId.title,
+        eventLocation: meeting.eventId.location,
+        slotStart: meeting.slotStart,
+        slotEnd: meeting.slotEnd,
+        status: meeting.status,
+        createdAt: meeting.createdAt,
+        otherParticipant,
+        otherParticipantType,
+        isRequester: meeting.requesterId.toString() === userId.toString()
+      };
+    })
+  );
+
+  // Group meetings by date
+  const meetingsByDate = {};
+  meetingsWithDetails.forEach(meeting => {
+    const dateKey = meeting.slotStart.toISOString().split('T')[0];
+    if (!meetingsByDate[dateKey]) {
+      meetingsByDate[dateKey] = [];
+    }
+    meetingsByDate[dateKey].push(meeting);
+  });
+
+  successResponse(res, {
+    totalConfirmedMeetings: meetingsWithDetails.length,
+    meetingsByDate
+  });
+});
+
+// Toggle slot visibility
+const toggleSlotVisibility = asyncHandler(async (req, res) => {
+  const { eventId, showSlots } = req.body;
+  const userId = req.user._id;
+  const userType = req.user.type;
+
+  if (!eventId || typeof showSlots !== 'boolean') {
+    return errorResponse(res, 'Event ID and showSlots boolean are required', 400);
+  }
+
+  const userSlot = await UserEventSlot.findOne({
+    userId,
+    userType,
+    eventId
+  });
+
+  if (!userSlot) {
+    return errorResponse(res, 'User slots not found for this event', 404);
+  }
+
+  userSlot.showSlots = showSlots;
+  await userSlot.save();
+
+  successResponse(res, {
+    message: `Slots ${showSlots ? 'enabled' : 'disabled'} successfully`,
+    showSlots: userSlot.showSlots
+  });
+});
+
+// Get user's own slot status for an event
+const getMySlotStatus = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  const userId = req.user._id;
+  const userType = req.user.type;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const userSlot = await UserEventSlot.findOne({
+    userId,
+    userType,
+    eventId
+  });
+
+  if (!userSlot) {
+    return errorResponse(res, 'User slots not found for this event', 404);
+  }
+
+  // Group slots by date and status with color coding
+  const slotsByDate = {};
+  const statusCounts = {
+    available: 0,
+    requested: 0,
+    booked: 0
+  };
+
+  const statusColors = {
+    'available': 'green',    // Available for booking
+    'requested': 'yellow',   // Pending approval  
+    'booked': 'red'         // Confirmed meeting
+  };
+
+  userSlot.slots.forEach(slot => {
+    const dateKey = slot.start.toISOString().split('T')[0];
+    if (!slotsByDate[dateKey]) {
+      slotsByDate[dateKey] = {
+        available: [],
+        requested: [],
+        booked: []
+      };
+    }
+    
+    slotsByDate[dateKey][slot.status].push({
+      _id: slot._id,
+      start: slot.start,
+      end: slot.end,
+      status: slot.status,
+      color: statusColors[slot.status] || 'gray',
+      meetingId: slot.meetingId,
+      isAvailable: slot.status === 'available',
+      isPending: slot.status === 'requested',
+      isBooked: slot.status === 'booked'
+    });
+
+    statusCounts[slot.status]++;
+  });
+
+  successResponse(res, {
+    eventId,
+    showSlots: userSlot.showSlots,
+    totalSlots: userSlot.slots.length,
+    statusCounts,
+    slotsByDate
+  });
+});
+
 module.exports = {
   getTotalConnections,
   getEventConnections,
   getAttendedEvents,
   recordScan,
-  getScanStatistics
+  getScanStatistics,
+  getScannedUserSlots,
+  sendMeetingRequest,
+  getPendingMeetingRequests,
+  respondToMeetingRequest,
+  getConfirmedMeetings,
+  toggleSlotVisibility,
+  getMySlotStatus
 };

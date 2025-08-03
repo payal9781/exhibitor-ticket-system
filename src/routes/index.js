@@ -14,4 +14,8 @@ router.use('/users', require('./userRoutes'));
 router.use('/mobile', require('./mobileRoutes'));
 router.use('/registration', require('./registrationRoutes'));
 
+// Mobile App APIs
+router.use('/exhibitor-mobile', require('./exhibitorMobileRoutes'));
+router.use('/visitor-mobile', require('./visitorMobileRoutes'));
+
 module.exports = router;
