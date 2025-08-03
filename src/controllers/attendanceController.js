@@ -1,6 +1,6 @@
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const asyncHandler = require('express-async-handler');
-const Attendance = require('../models/Attendance');
+const Attendance = require('../models/z-index').models.Attendance;
 const Event = require('../models/Event');
 
 const markAttendance = asyncHandler(async (req, res) => {

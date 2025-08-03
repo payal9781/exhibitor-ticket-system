@@ -4,9 +4,9 @@ const Event = require('../models/Event');
 const Exhibitor = require('../models/Exhibitor');
 const Visitor = require('../models/Visitor');
 const Scan = require('../models/Scan');
-const Meeting = require('../models/meeting');
+const Meeting = require('../models/z-index').models.Meeting;
 const UserEventSlot = require('../models/UserEventSlot');
-const Attendance = require('../models/Attendance');
+const Attendance = require('../models/z-index').models.Attendance;
 
 // Get total connections for exhibitor/visitor across all events
 const getTotalConnections = asyncHandler(async (req, res) => {
@@ -123,10 +123,83 @@ const getEventConnections = asyncHandler(async (req, res) => {
   });
 });
 
-// Get all events that user has attended (has scans in)
+// Get all events where user is registered (for mobile app home screen)
+const getMyRegisteredEvents = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const userType = req.user.type;
+  const currentDate = new Date();
+  
+  // Find events where user is registered
+  let query = {
+    isDeleted: false,
+    isActive: true
+  };
+  
+  if (userType === 'exhibitor') {
+    query['exhibitor.userId'] = userId;
+  } else {
+    query['visitor.userId'] = userId;
+  }
+  
+  const events = await Event.find(query)
+    .populate('organizerId', 'name email companyName')
+    .sort({ fromDate: 1 });
+  
+  // Add status and connection count for each event
+  const eventsWithDetails = await Promise.all(events.map(async (event) => {
+    const eventObj = event.toObject();
+    
+    // Add status
+    const eventEndDate = new Date(event.toDate);
+    if (eventEndDate < currentDate) {
+      eventObj.status = 'ended';
+      eventObj.statusColor = 'red';
+    } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+      eventObj.status = 'ongoing';
+      eventObj.statusColor = 'orange';
+    } else {
+      eventObj.status = 'upcoming';
+      eventObj.statusColor = 'green';
+    }
+    
+    // Get connection count for this event
+    const scans = await Scan.find({ 
+      scanner: userId, 
+      userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+      eventId: event._id
+    });
+    
+    const uniqueScannedUsers = new Set();
+    scans.forEach(scan => {
+      scan.scannedUser.forEach(scannedUserId => {
+        uniqueScannedUsers.add(scannedUserId.toString());
+      });
+    });
+    
+    eventObj.totalConnections = uniqueScannedUsers.size;
+    
+    // Add user's QR code for this event
+    const userRegistration = userType === 'exhibitor' 
+      ? event.exhibitor.find(e => e.userId.toString() === userId.toString())
+      : event.visitor.find(v => v.userId.toString() === userId.toString());
+    
+    eventObj.myQRCode = userRegistration?.qrCode;
+    eventObj.registeredAt = userRegistration?.registeredAt;
+    
+    return eventObj;
+  }));
+  
+  successResponse(res, {
+    totalEvents: eventsWithDetails.length,
+    events: eventsWithDetails
+  });
+});
+
+// Get all events that user has attended (has scans in) - for mobile home screen
 const getAttendedEvents = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
+  const currentDate = new Date();
   
   // Get all scans by this user
   const scans = await Scan.find({ 
@@ -134,25 +207,59 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
     userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor' 
   }).populate('eventId', 'title fromDate toDate location media');
   
-  // Get unique events
+  // Get unique events with enhanced details
   const uniqueEvents = {};
   scans.forEach(scan => {
     const eventId = scan.eventId._id.toString();
     if (!uniqueEvents[eventId]) {
+      const event = scan.eventId;
+      
+      // Add status
+      const eventEndDate = new Date(event.toDate);
+      let status, statusColor;
+      if (eventEndDate < currentDate) {
+        status = 'ended';
+        statusColor = 'red';
+      } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+        status = 'ongoing';
+        statusColor = 'orange';
+      } else {
+        status = 'upcoming';
+        statusColor = 'green';
+      }
+      
       uniqueEvents[eventId] = {
         eventId,
-        title: scan.eventId.title,
-        fromDate: scan.eventId.fromDate,
-        toDate: scan.eventId.toDate,
-        location: scan.eventId.location,
-        media: scan.eventId.media,
-        totalScans: 0
+        title: event.title,
+        fromDate: event.fromDate,
+        toDate: event.toDate,
+        location: event.location,
+        media: event.media,
+        status,
+        statusColor,
+        totalConnections: 0,
+        uniqueScannedUsers: new Set()
       };
     }
-    uniqueEvents[eventId].totalScans += scan.scannedUser.length;
+    
+    // Count unique scanned users
+    scan.scannedUser.forEach(scannedUserId => {
+      uniqueEvents[eventId].uniqueScannedUsers.add(scannedUserId.toString());
+    });
   });
   
-  const attendedEvents = Object.values(uniqueEvents);
+  // Convert to array and finalize connection counts
+  const attendedEvents = Object.values(uniqueEvents).map(event => ({
+    eventId: event.eventId,
+    title: event.title,
+    fromDate: event.fromDate,
+    toDate: event.toDate,
+    location: event.location,
+    media: event.media,
+    status: event.status,
+    statusColor: event.statusColor,
+    totalConnections: event.uniqueScannedUsers.size
+  }));
   
   successResponse(res, {
     totalEvents: attendedEvents.length,
@@ -306,10 +413,10 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
     attendedDates.add(dateKey);
   });
 
-  // Filter slots to only show those on attended dates
-  const availableSlots = userSlots.slots.filter(slot => {
+  // Filter slots to only show those on attended dates (all statuses)
+  const filteredSlots = userSlots.slots.filter(slot => {
     const slotDateKey = slot.start.toISOString().split('T')[0];
-    return attendedDates.has(slotDateKey) && slot.status === 'available';
+    return attendedDates.has(slotDateKey);
   });
   
   // Group slots by date with color indicators
@@ -320,7 +427,10 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
     'booked': 'red'         // Confirmed meeting
   };
 
-  availableSlots.forEach(slot => {
+  // Count slots by status
+  const statusCounts = { available: 0, requested: 0, booked: 0 };
+  
+  filteredSlots.forEach(slot => {
     const dateKey = slot.start.toISOString().split('T')[0];
     if (!slotsByDate[dateKey]) {
       slotsByDate[dateKey] = [];
@@ -331,8 +441,15 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
       end: slot.end,
       status: slot.status,
       color: statusColors[slot.status] || 'gray',
-      isAvailable: slot.status === 'available'
+      isAvailable: slot.status === 'available',
+      isPending: slot.status === 'requested',
+      isBooked: slot.status === 'booked'
     });
+    
+    // Count status
+    if (statusCounts.hasOwnProperty(slot.status)) {
+      statusCounts[slot.status]++;
+    }
   });
 
   // Get scanned user details
@@ -349,7 +466,8 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
     scannedUser: scannedUserDetails,
     scannedUserType,
     eventId,
-    totalAvailableSlots: availableSlots.length,
+    totalSlots: filteredSlots.length,
+    statusCounts,
     slotsByDate,
     attendedDates: Array.from(attendedDates),
     attendanceInfo: {
@@ -361,19 +479,19 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
 
 // Send meeting request to a scanned user
 const sendMeetingRequest = asyncHandler(async (req, res) => {
-  const { eventId, requesteeId, requesteeType, slotStart, slotEnd } = req.body;
+  const { eventId, requestedId, requestedType, slotStart, slotEnd } = req.body;
   const requesterId = req.user._id;
   const requesterType = req.user.type;
 
-  if (!eventId || !requesteeId || !requesteeType || !slotStart || !slotEnd) {
+  if (!eventId || !requestedId || !requestedType || !slotStart || !slotEnd) {
     return errorResponse(res, 'All fields are required', 400);
   }
 
-  // Verify that the requester has scanned the requestee
+  // Verify that the requester has scanned the requested user
   const scanRecord = await Scan.findOne({
     scanner: requesterId,
     eventId,
-    scannedUser: requesteeId
+    scannedUser: requestedId
   });
 
   if (!scanRecord) {
@@ -382,8 +500,8 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
 
   // Check if the slot is still available
   const userSlot = await UserEventSlot.findOne({
-    userId: requesteeId,
-    userType: requesteeType,
+    userId: requestedId,
+    userType: requestedType,
     eventId
   });
 
@@ -405,8 +523,8 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
     eventId,
     requesterId,
     requesterType,
-    requestedId: requesteeId,
-    requestedType: requesteeType,
+    requestedId,
+    requestedType,
     slotStart: new Date(slotStart),
     slotEnd: new Date(slotEnd)
   });
@@ -634,6 +752,106 @@ const getConfirmedMeetings = asyncHandler(async (req, res) => {
   });
 });
 
+// Get mobile dashboard data (for home screen)
+const getMobileDashboard = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const userType = req.user.type;
+  
+  // Get total connections
+  const scans = await Scan.find({ 
+    scanner: userId, 
+    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor' 
+  });
+  
+  const uniqueScannedUsers = new Set();
+  scans.forEach(scan => {
+    scan.scannedUser.forEach(scannedUserId => {
+      uniqueScannedUsers.add(scannedUserId.toString());
+    });
+  });
+  
+  const totalConnections = uniqueScannedUsers.size;
+  
+  // Get total events attended
+  const totalEvents = new Set(scans.map(scan => scan.eventId.toString())).size;
+  
+  // Get pending meeting requests count
+  const pendingRequests = await Meeting.countDocuments({
+    requestedId: userId,
+    requestedType: userType,
+    status: 'pending'
+  });
+  
+  // Get confirmed meetings count
+  const confirmedMeetings = await Meeting.countDocuments({
+    $or: [
+      { requesterId: userId, requesterType: userType },
+      { requestedId: userId, requestedType: userType }
+    ],
+    status: 'accepted'
+  });
+  
+  successResponse(res, {
+    totalConnections,
+    totalEvents,
+    pendingRequests,
+    confirmedMeetings,
+    userType
+  });
+});
+
+// Get user's own profile
+const getMyProfile = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const userType = req.user.type;
+  
+  let user;
+  if (userType === 'exhibitor') {
+    user = await Exhibitor.findById(userId).select('-otp -otpExpires');
+  } else {
+    user = await Visitor.findById(userId).select('-otp -otpExpires');
+  }
+  
+  if (!user) {
+    return errorResponse(res, 'User not found', 404);
+  }
+  
+  const userResponse = user.toObject();
+  userResponse.userType = userType;
+  
+  successResponse(res, userResponse);
+});
+
+// Update user's own profile
+const updateMyProfile = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const userType = req.user.type;
+  const updateData = req.body;
+  
+  // Remove sensitive fields that shouldn't be updated
+  delete updateData.otp;
+  delete updateData.otpExpires;
+  delete updateData.isActive;
+  delete updateData.isDeleted;
+  delete updateData._id;
+  
+  let user;
+  if (userType === 'exhibitor') {
+    user = await Exhibitor.findByIdAndUpdate(userId, updateData, { new: true }).select('-otp -otpExpires');
+  } else {
+    user = await Visitor.findByIdAndUpdate(userId, updateData, { new: true }).select('-otp -otpExpires');
+  }
+  
+  if (!user) {
+    return errorResponse(res, 'User not found', 404);
+  }
+  
+  const userResponse = user.toObject();
+  userResponse.userType = userType;
+  
+  successResponse(res, userResponse);
+});
+
 // Toggle slot visibility
 const toggleSlotVisibility = asyncHandler(async (req, res) => {
   const { eventId, showSlots } = req.body;
@@ -734,6 +952,7 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
 module.exports = {
   getTotalConnections,
   getEventConnections,
+  getMyRegisteredEvents,
   getAttendedEvents,
   recordScan,
   getScanStatistics,
@@ -742,6 +961,9 @@ module.exports = {
   getPendingMeetingRequests,
   respondToMeetingRequest,
   getConfirmedMeetings,
+  getMobileDashboard,
+  getMyProfile,
+  updateMyProfile,
   toggleSlotVisibility,
   getMySlotStatus
 };

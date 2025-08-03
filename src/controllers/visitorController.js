@@ -5,7 +5,7 @@ const Event = require('../models/Event');
 const Organizer = require('../models/Organizer');
 const Exhibitor = require('../models/Exhibitor');
 const UserEventSlot = require('../models/UserEventSlot');
-const Meeting = require('../models/Meeting');
+const Meeting = require('../models/z-index').models.Meeting;
 
 const createVisitor = asyncHandler(async (req, res) => {
   const visitor = new Visitor(req.body);

@@ -81,7 +81,7 @@ const sendOtp = asyncHandler(async (req, res) => {
 });
 
 const verifyOtp = asyncHandler(async (req, res) => {
-  const { role, userId, otp, eventId, details } = req.body;
+  const { role, userId, otp, details } = req.body;
   if (!['exhibitor', 'visitor'].includes(role)) return errorResponse(res, 'Invalid role for OTP login');
   const Model = getModelByRole(role);
   const user = await Model.findById(userId);
@@ -106,28 +106,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
   delete userResponse.password;
   userResponse.role = role;
   
-  if (!eventId) {
-    return successResponse(res, { user: userResponse, token });
-  }
-  // Add to event and generate QR
-  const event = await Event.findById(eventId);
-  if (!event) return errorResponse(res, 'Event not found', 404);
-  const userType = role;
-  if (userType === 'exhibitor') {
-    if (!event.exhibitor.includes(user._id)) event.exhibitor.push(user._id);
-  } else if (userType === 'visitor') {
-    if (!event.visitor.includes(user._id)) event.visitor.push(user._id);
-  } else return errorResponse(res, 'Invalid user type');
-  await event.save();
-
-  const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-  const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
-  const userSlot = new UserEventSlot({ userId: user._id, userType, eventId, slots });
-  await userSlot.save();
-
-  const qrData = { eventId, userId: user._id, role: userType, startDate: event.fromDate, endDate: event.toDate };
-  const qrCode = await generateQR(qrData);
-  successResponse(res, { user: userResponse, token, qrCode });
+  successResponse(res, { user: userResponse, token });
 });
 
 const login = asyncHandler(async (req, res) => {
