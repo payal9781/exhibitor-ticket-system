@@ -32,10 +32,32 @@ const register = asyncHandler(async (req, res) => {
   if (['exhibitor', 'visitor'].includes(role)) {
     return errorResponse(res, 'Use event registration flow for exhibitor/visitor', 400);
   }
-  const user = new Model(userData);
-  await user.save();
-  const token = user.generateAccessToken();
-  successResponse(res, { user, token }, 201);
+  
+  // Check if user already exists
+  const existingUser = await Model.findOne({ email: userData.email });
+  if (existingUser) {
+    return errorResponse(res, 'User with this email already exists', 409);
+  }
+  
+  try {
+    const user = new Model(userData);
+    await user.save();
+    const token = user.generateAccessToken();
+    
+    // Remove password from response and add role
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    userResponse.role = role; // Add role to response
+    
+    successResponse(res, { user: userResponse, token }, 201);
+  } catch (error) {
+    if (error.code === 11000) {
+      // Handle duplicate key error
+      const field = Object.keys(error.keyPattern)[0];
+      return errorResponse(res, `${field} already exists`, 409);
+    }
+    throw error;
+  }
 });
 
 const sendOtp = asyncHandler(async (req, res) => {
@@ -79,8 +101,13 @@ const verifyOtp = asyncHandler(async (req, res) => {
     await user.save();
   }
   const token = user.generateAccessToken();
+  // Add role to user response
+  const userResponse = user.toObject();
+  delete userResponse.password;
+  userResponse.role = role;
+  
   if (!eventId) {
-    return successResponse(res, { user, token });
+    return successResponse(res, { user: userResponse, token });
   }
   // Add to event and generate QR
   const event = await Event.findById(eventId);
@@ -100,7 +127,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
   const qrData = { eventId, userId: user._id, role: userType, startDate: event.fromDate, endDate: event.toDate };
   const qrCode = await generateQR(qrData);
-  successResponse(res, { user, token, qrCode });
+  successResponse(res, { user: userResponse, token, qrCode });
 });
 
 const login = asyncHandler(async (req, res) => {
@@ -113,7 +140,11 @@ const login = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Invalid credentials', 401);
   }
   const token = user.generateAccessToken();
-  successResponse(res, { user, token });
+  // Add role to user response
+  const userResponse = user.toObject();
+  delete userResponse.password;
+  userResponse.role = role;
+  successResponse(res, { user: userResponse, token });
 });
 
 const logout = asyncHandler(async (req, res) => {

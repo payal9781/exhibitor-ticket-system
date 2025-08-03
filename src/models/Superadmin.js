@@ -1,15 +1,15 @@
 // src/models/Superadmin.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const superadminSchema = new mongoose.Schema({
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
-    mobile: { type: String, unique: true, sparse: true },
+    phone: { type: String, unique: true, sparse: true },
     avatar: { type: String, default: '' },
-    extraDetails: { type: mongoose.Schema.Types.Mixed, default: {} },
-    isActive: { type: Boolean, default: false },
+    isActive: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },
     extraDetails: { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
@@ -39,4 +39,4 @@ superadminSchema.methods.generateAccessToken = function () {
 };
 
 
-module.exports = mongoose.model('Superadmin', superadminSchema);
+module.exports = mongoose.models.Superadmin || mongoose.model('Superadmin', superadminSchema);

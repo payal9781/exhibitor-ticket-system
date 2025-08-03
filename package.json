@@ -18,6 +18,7 @@
     "cors": "^2.8.5",
     "cross-env": "^10.0.0",
     "dotenv": "^17.2.1",
+    "ejs": "^3.1.10",
     "express": "^5.1.0",
     "express-async-handler": "^1.2.0",
     "joi": "^17.13.3",

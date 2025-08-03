@@ -11,8 +11,8 @@ const eventSchema = new mongoose.Schema({
   description: { type: String },
   fromDate: { type: Date, required: true },
   toDate: { type: Date, required: true },
-  startTime: { type: Date, required: true },
-  endTime: { type: Date, required: true },
+  startTime: { type: String, required: true }, // Format: "HH:MM:SS"
+  endTime: { type: String, required: true }, // Format: "HH:MM:SS"
   status: { type: Boolean, default: false },
   location: { type: String, required: true },
   media: [{ type: String }],
@@ -24,4 +24,4 @@ const eventSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-module.exports = mongoose.model('Event', eventSchema);
+module.exports = mongoose.models.Event || mongoose.model('Event', eventSchema);

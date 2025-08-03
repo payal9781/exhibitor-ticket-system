@@ -7,12 +7,19 @@ const Visitor = require('../models/Visitor');
 
 const createExhibitor = asyncHandler(async (req, res) => {
   const exhibitor = new Exhibitor(req.body);
+  const isExists = await Exhibitor.findOne({ email: exhibitor.email });
+  if(isExists && !isExists?.isDeleted && isExists?.isActive){
+     return errorResponse(res,'Email already exists',409)
+  }
+  if(isExists && isExists?.isDeleted && !isExists?.isActive){
+    return errorResponse(res,'contact to adminitrator',409)
+  }
   await exhibitor.save();
   successResponse(res, exhibitor, 201);
 });
 
 const getExhibitors = asyncHandler(async (req, res) => {
-  const exhibitors = await Exhibitor.find({});
+  const exhibitors = await Exhibitor.find({isActive:true ,isDeleted: false});
   successResponse(res, exhibitors);
 });
 
@@ -68,4 +75,83 @@ const getUserDetails = asyncHandler(async (req, res) => {
   successResponse(res, user);
 });
 
-module.exports = { createExhibitor, getExhibitors, getExhibitorById, updateExhibitor, deleteExhibitor, getOrganizersEventWise, getEventsOrganizerWise, getParticipantsEventWise, getUserDetails };
+// Get exhibitor statistics
+const getExhibitorStats = asyncHandler(async (req, res) => {
+  const totalExhibitors = await Exhibitor.countDocuments({ isDeleted: false });
+  const activeExhibitors = await Exhibitor.countDocuments({ isDeleted: false, isActive: true });
+  const checkedInExhibitors = await Exhibitor.countDocuments({ isDeleted: false, isCheckedIn: true });
+  
+  const stats = {
+    totalExhibitors,
+    activeExhibitors,
+    checkedInExhibitors,
+    inactiveExhibitors: totalExhibitors - activeExhibitors
+  };
+  
+  successResponse(res, stats);
+});
+
+// Get available booths for an event
+const getAvailableBooths = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  
+  // Mock booth data - in real implementation, this would come from a Booth model
+  const booths = [
+    { id: 'A1', name: 'Booth A1', size: 'Large', price: 5000, available: true },
+    { id: 'A2', name: 'Booth A2', size: 'Medium', price: 3000, available: true },
+    { id: 'A3', name: 'Booth A3', size: 'Small', price: 2000, available: false },
+    { id: 'B1', name: 'Booth B1', size: 'Large', price: 5000, available: true },
+    { id: 'B2', name: 'Booth B2', size: 'Medium', price: 3000, available: true }
+  ];
+  
+  const availableBooths = booths.filter(booth => booth.available);
+  successResponse(res, availableBooths);
+});
+
+// Check in exhibitor
+const checkInExhibitor = asyncHandler(async (req, res) => {
+  const { id } = req.body;
+  const exhibitor = await Exhibitor.findByIdAndUpdate(
+    id, 
+    { 
+      isCheckedIn: true, 
+      checkInTime: new Date() 
+    }, 
+    { new: true }
+  );
+  
+  if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
+  successResponse(res, exhibitor);
+});
+
+// Check out exhibitor
+const checkOutExhibitor = asyncHandler(async (req, res) => {
+  const { id } = req.body;
+  const exhibitor = await Exhibitor.findByIdAndUpdate(
+    id, 
+    { 
+      isCheckedIn: false, 
+      checkOutTime: new Date() 
+    }, 
+    { new: true }
+  );
+  
+  if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
+  successResponse(res, exhibitor);
+});
+
+module.exports = { 
+  createExhibitor, 
+  getExhibitors, 
+  getExhibitorById, 
+  updateExhibitor, 
+  deleteExhibitor, 
+  getOrganizersEventWise, 
+  getEventsOrganizerWise, 
+  getParticipantsEventWise, 
+  getUserDetails,
+  getExhibitorStats,
+  getAvailableBooths,
+  checkInExhibitor,
+  checkOutExhibitor
+};

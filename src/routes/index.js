@@ -8,5 +8,10 @@ router.use('/exhibitors', require('./exhibitorRoutes'));
 router.use('/visitors', require('./visitorRoutes'));
 router.use('/attendance', require('./attendanceRoutes'));
 router.use('/meetings', require('./meetingRoutes'));
+router.use('/dashboard', require('./dashboardRoutes'));
+router.use('/superadmin', require('./superadminRoutes'));
+router.use('/users', require('./userRoutes'));
+router.use('/mobile', require('./mobileRoutes'));
+router.use('/registration', require('./registrationRoutes'));
 
 module.exports = router;

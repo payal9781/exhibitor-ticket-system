@@ -10,7 +10,7 @@ const authMiddleware = (roles = []) => asyncHandler(async (req, res, next) => {
       return res.status(403).json({ message: 'Access denied' });
     }
     next();
-  } catch (err) {a
+  } catch (err) {
     res.status(401).json({ message: 'Invalid token' });
   }
 });

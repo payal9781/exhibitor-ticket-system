@@ -3,9 +3,22 @@ const generateSlots = (fromDate, toDate, startTime, endTime) => {
   const slots = [];
   let currentDate = moment(fromDate);
   const eventEndDate = moment(toDate);
+  
   while (currentDate.isSameOrBefore(eventEndDate)) {
-    let currentTime = moment(startTime).set('date', currentDate.date()).set('month', currentDate.month()).set('year', currentDate.year());
-    const dayEndTime = moment(endTime).set('date', currentDate.date()).set('month', currentDate.month()).set('year', currentDate.year());
+    // Parse time strings (HH:MM:SS format) and combine with current date
+    const [startHour, startMinute, startSecond = 0] = startTime.split(':').map(Number);
+    const [endHour, endMinute, endSecond = 0] = endTime.split(':').map(Number);
+    
+    let currentTime = moment(currentDate)
+      .hour(startHour)
+      .minute(startMinute)
+      .second(startSecond);
+      
+    const dayEndTime = moment(currentDate)
+      .hour(endHour)
+      .minute(endMinute)
+      .second(endSecond);
+    
     while (currentTime.isBefore(dayEndTime)) {
       const slotEnd = moment(currentTime).add(30, 'minutes');
       if (slotEnd.isAfter(dayEndTime)) break;

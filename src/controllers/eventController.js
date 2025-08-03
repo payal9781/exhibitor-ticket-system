@@ -11,32 +11,35 @@ const createEvent = asyncHandler(async (req, res) => {
 });
 
 const getEvents = asyncHandler(async (req, res) => {
-  const { organizerId } = req.query;
-  let query = {};
+  const { organizerId } = req.body;
+  let query = { isDeleted: false };
   if (req.user.type === 'organizer') query.organizerId = req.user._id;
-  if (req.user.type === 'superAdmin' && organizerId) query.organizerId = organizerId;
-  const events = await Event.find(query);
+  if (req.user.type === 'superadmin' && organizerId) query.organizerId = organizerId;
+  const events = await Event.find(query).populate('organizerId', 'name email companyName');
   successResponse(res, events);
 });
 
 const getEventById = asyncHandler(async (req, res) => {
-  const event = await Event.findById(req.params.id);
+  const { id } = req.body;
+  const event = await Event.findById(id).populate('organizerId', 'name email companyName');
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
+  if (req.user.type === 'organizer' && event.organizerId._id.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
   successResponse(res, event);
 });
 
 const updateEvent = asyncHandler(async (req, res) => {
-  const event = await Event.findById(req.params.id);
+  const { id, ...updateData } = req.body;
+  const event = await Event.findById(id);
   if (!event) return errorResponse(res, 'Event not found', 404);
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
-  Object.assign(event, req.body);
+  Object.assign(event, updateData);
   await event.save();
   successResponse(res, event);
 });
 
 const deleteEvent = asyncHandler(async (req, res) => {
-  const event = await Event.findById(req.params.id);
+  const { id } = req.body;
+  const event = await Event.findById(id);
   if (!event) return errorResponse(res, 'Event not found', 404);
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
   event.isDeleted = true;
@@ -68,4 +71,36 @@ const registerForEvent = asyncHandler(async (req, res) => {
   successResponse(res, { message: 'Registered successfully', qrCode });
 });
 
-module.exports = { createEvent, getEvents, getEventById, updateEvent, deleteEvent, registerForEvent };
+// Get event statistics
+const getEventStats = asyncHandler(async (req, res) => {
+  let query = { isDeleted: false };
+  if (req.user.type === 'organizer') {
+    query.organizerId = req.user._id;
+  }
+  
+  const totalEvents = await Event.countDocuments(query);
+  const activeEvents = await Event.countDocuments({ 
+    ...query, 
+    fromDate: { $lte: new Date() }, 
+    toDate: { $gte: new Date() } 
+  });
+  const upcomingEvents = await Event.countDocuments({ 
+    ...query, 
+    fromDate: { $gt: new Date() } 
+  });
+  const pastEvents = await Event.countDocuments({ 
+    ...query, 
+    toDate: { $lt: new Date() } 
+  });
+  
+  const stats = {
+    totalEvents,
+    activeEvents,
+    upcomingEvents,
+    pastEvents
+  };
+  
+  successResponse(res, stats);
+});
+
+module.exports = { createEvent, getEvents, getEventById, updateEvent, deleteEvent, registerForEvent, getEventStats };

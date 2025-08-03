@@ -1,8 +1,10 @@
 // src/models/Organizer.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const organizerSchema = new mongoose.Schema({
+  name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   phone: { type: String, unique: true, sparse: true },
@@ -38,4 +40,4 @@ organizerSchema.methods.generateAccessToken = function () {
 };
 
 
-module.exports = mongoose.model('Organizer', organizerSchema);
+module.exports = mongoose.models.Organizer || mongoose.model('Organizer', organizerSchema);

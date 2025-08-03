@@ -7,12 +7,19 @@ const Exhibitor = require('../models/Exhibitor');
 
 const createVisitor = asyncHandler(async (req, res) => {
   const visitor = new Visitor(req.body);
+  const isExists = await Visitor.findOne({ email: visitor.email });
+  if(isExists && isExists?.isActive && !isExists?.isDeleted){
+    return errorResponse(res,'Email already exists');
+  }
+  if(isExists && !isExists?.isActive && isExists?.isDeleted){
+    return errorResponse(res,'contact to adminitrator');
+  }
   await visitor.save();
   successResponse(res, visitor, 201);
 });
 
 const getVisitors = asyncHandler(async (req, res) => {
-  const visitors = await Visitor.find({});
+  const visitors = await Visitor.find({isActive:true ,isDeleted: false});
   successResponse(res, visitors);
 });
 
@@ -68,4 +75,82 @@ const getUserDetails = asyncHandler(async (req, res) => {
   successResponse(res, user);
 });
 
-module.exports = { createVisitor, getVisitors, getVisitorById, updateVisitor, deleteVisitor, getOrganizersEventWise, getEventsOrganizerWise, getParticipantsEventWise, getUserDetails };
+// Get visitor statistics
+const getVisitorStats = asyncHandler(async (req, res) => {
+  const totalVisitors = await Visitor.countDocuments({ isDeleted: false });
+  const activeVisitors = await Visitor.countDocuments({ isDeleted: false, isActive: true });
+  const checkedInVisitors = await Visitor.countDocuments({ isDeleted: false, isCheckedIn: true });
+  
+  const stats = {
+    totalVisitors,
+    activeVisitors,
+    checkedInVisitors,
+    inactiveVisitors: totalVisitors - activeVisitors
+  };
+  
+  successResponse(res, stats);
+});
+
+// Check in visitor
+const checkInVisitor = asyncHandler(async (req, res) => {
+  const { id } = req.body;
+  const visitor = await Visitor.findByIdAndUpdate(
+    id, 
+    { 
+      isCheckedIn: true, 
+      checkInTime: new Date() 
+    }, 
+    { new: true }
+  );
+  
+  if (!visitor) return errorResponse(res, 'Visitor not found', 404);
+  successResponse(res, visitor);
+});
+
+// Check out visitor
+const checkOutVisitor = asyncHandler(async (req, res) => {
+  const { id } = req.body;
+  const visitor = await Visitor.findByIdAndUpdate(
+    id, 
+    { 
+      isCheckedIn: false, 
+      checkOutTime: new Date() 
+    }, 
+    { new: true }
+  );
+  
+  if (!visitor) return errorResponse(res, 'Visitor not found', 404);
+  successResponse(res, visitor);
+});
+
+// Bulk check in visitors
+const bulkCheckIn = asyncHandler(async (req, res) => {
+  const { visitorIds } = req.body;
+  const visitors = await Visitor.updateMany(
+    { _id: { $in: visitorIds }, isDeleted: false },
+    { 
+      isCheckedIn: true, 
+      checkInTime: new Date() 
+    },
+    { new: true }
+  );
+  
+  const updatedVisitors = await Visitor.find({ _id: { $in: visitorIds }, isDeleted: false });
+  successResponse(res, updatedVisitors);
+});
+
+module.exports = { 
+  createVisitor, 
+  getVisitors, 
+  getVisitorById, 
+  updateVisitor, 
+  deleteVisitor, 
+  getOrganizersEventWise, 
+  getEventsOrganizerWise, 
+  getParticipantsEventWise, 
+  getUserDetails,
+  getVisitorStats,
+  checkInVisitor,
+  checkOutVisitor,
+  bulkCheckIn
+};

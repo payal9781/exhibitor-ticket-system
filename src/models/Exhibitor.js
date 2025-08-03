@@ -13,7 +13,7 @@ const exhibitorSchema = new mongoose.Schema({
   website: { type: String },
   location: { type: String },
   socialMediaLinks: { type: Object },
-  isActive: { type: Boolean, default: false },
+  isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
   otp: { type: String },
   otpExpires: { type: Date }
@@ -32,4 +32,4 @@ exhibitorSchema.methods.generateAccessToken = function () {
     }
   );
 };
-module.exports = mongoose.model('Exhibitor', exhibitorSchema);
+module.exports = mongoose.models.Exhibitor || mongoose.model('Exhibitor', exhibitorSchema);

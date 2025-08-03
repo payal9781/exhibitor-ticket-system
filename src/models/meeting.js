@@ -9,4 +9,4 @@ const meetingSchema = new mongoose.Schema({
   slotEnd: { type: Date, required: true },
   status: { type: String, enum: ['pending', 'accepted', 'rejected', 'cancelled'], default: 'pending' },
 }, { timestamps: true });
-module.exports = mongoose.model('Meeting', meetingSchema);
+module.exports = mongoose.models.Meeting || mongoose.model('Meeting', meetingSchema);

@@ -11,4 +11,4 @@ const userEventSlotSchema = new mongoose.Schema({
         meetingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Meeting' } 
     }]
 }, { timestamps: true });
-module.exports = mongoose.model('UserEventSlot', userEventSlotSchema);
+module.exports = mongoose.models.UserEventSlot || mongoose.model('UserEventSlot', userEventSlotSchema);
