@@ -12,13 +12,13 @@ const Attendance = require('../models/z-index').models.Attendance;
 const getTotalConnections = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
-  
+
   // Get all scans where this user is the scanner
-  const scans = await Scan.find({ 
-    scanner: userId, 
-    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor' 
+  const scans = await Scan.find({
+    scanner: userId,
+    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
   }).populate('eventId', 'title');
-  
+
   // Count total unique scanned users across all events
   const uniqueScannedUsers = new Set();
   scans.forEach(scan => {
@@ -26,15 +26,32 @@ const getTotalConnections = asyncHandler(async (req, res) => {
       uniqueScannedUsers.add(scannedUserId.toString());
     });
   });
-  
+
   const totalConnections = uniqueScannedUsers.size;
-  
+
+  // Get total events count where user is registered
+  const totalEventsCount = await Event.countDocuments({
+    isDeleted: false,
+    $or: [
+      { 'exhibitor.userId': userId },
+      { 'visitor.userId': userId }
+    ]
+  });
+
+  // Get total accepted meetings count
+  const totalAcceptedMeetings = await Meeting.countDocuments({
+    $or: [
+      { requesterId: userId, status: 'accepted' },
+      { recipientId: userId, status: 'accepted' }
+    ]
+  });
+
   // Get event-wise breakdown
   const eventWiseConnections = {};
   for (const scan of scans) {
     const eventId = scan.eventId._id.toString();
     const eventTitle = scan.eventId.title;
-    
+
     if (!eventWiseConnections[eventId]) {
       eventWiseConnections[eventId] = {
         eventId,
@@ -43,24 +60,29 @@ const getTotalConnections = asyncHandler(async (req, res) => {
         scannedUsers: new Set()
       };
     }
-    
+
     scan.scannedUser.forEach(scannedUserId => {
       eventWiseConnections[eventId].scannedUsers.add(scannedUserId.toString());
     });
-    
+
     eventWiseConnections[eventId].connections = eventWiseConnections[eventId].scannedUsers.size;
   }
-  
+
   // Convert to array and remove Set objects
   const eventConnections = Object.values(eventWiseConnections).map(event => ({
     eventId: event.eventId,
     eventTitle: event.eventTitle,
     connections: event.connections
   }));
-  
+
   successResponse(res, {
-    totalConnections,
-    eventWiseConnections: eventConnections
+    message: 'Total connections retrieved successfully',
+    data: {
+      totalConnections,
+      totalEventsCount,
+      totalAcceptedMeetings,
+      eventWiseConnections: eventConnections
+    }
   });
 });
 
@@ -69,57 +91,83 @@ const getEventConnections = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
   const userId = req.user._id;
   const userType = req.user.type;
-  
+
   if (!eventId) {
-    return errorResponse(res, 'Event ID is required', 400);
+    return successResponse(res, { message: 'Event ID is required', data: 0 });
   }
-  
+
   // Get scans for this specific event
-  const scans = await Scan.find({ 
-    scanner: userId, 
+  const scans = await Scan.find({
+    scanner: userId,
     userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
-    eventId 
+    eventId
   }).populate('eventId', 'title fromDate toDate');
-  
+
   if (scans.length === 0) {
     return successResponse(res, {
-      eventId,
-      eventTitle: 'Event not found',
-      totalConnections: 0,
-      exhibitorConnections: [],
-      visitorConnections: []
+      message: 'No connections found for this event',
+      data: {
+        eventId,
+        eventTitle: 'Event not found',
+        totalConnections: 0,
+        exhibitorConnections: [],
+        visitorConnections: []
+      }
     });
   }
-  
+
   const event = scans[0].eventId;
-  
+
   // Get all scanned user IDs
   const allScannedUserIds = [];
   scans.forEach(scan => {
     allScannedUserIds.push(...scan.scannedUser);
   });
-  
+
   // Get exhibitor and visitor details separately
-  const scannedExhibitors = await Exhibitor.find({ 
-    _id: { $in: allScannedUserIds } 
+  const scannedExhibitors = await Exhibitor.find({
+    _id: { $in: allScannedUserIds }
   }).select('companyName email phone profileImage bio Sector location');
-  
-  const scannedVisitors = await Visitor.find({ 
-    _id: { $in: allScannedUserIds } 
+
+  const scannedVisitors = await Visitor.find({
+    _id: { $in: allScannedUserIds }
   }).select('name email phone profileImage bio Sector location companyName');
-  
+
   const totalConnections = scannedExhibitors.length + scannedVisitors.length;
-  
+
+  // Get total events count where user is registered
+  const totalEventsCount = await Event.countDocuments({
+    isDeleted: false,
+    $or: [
+      { 'exhibitor.userId': userId },
+      { 'visitor.userId': userId }
+    ]
+  });
+
+  // Get total accepted meetings count for this specific event
+  const totalAcceptedMeetings = await Meeting.countDocuments({
+    eventId: eventId,
+    $or: [
+      { requesterId: userId, status: 'accepted' },
+      { recipientId: userId, status: 'accepted' }
+    ]
+  });
+
   successResponse(res, {
-    eventId,
-    eventTitle: event.title,
-    eventDates: {
-      fromDate: event.fromDate,
-      toDate: event.toDate
-    },
-    totalConnections,
-    exhibitorConnections: scannedExhibitors,
-    visitorConnections: scannedVisitors
+    message: 'Event connections retrieved successfully',
+    data: {
+      eventId,
+      eventTitle: event.title,
+      eventDates: {
+        fromDate: event.fromDate,
+        toDate: event.toDate
+      },
+      totalConnections,
+      totalEventsCount,
+      totalAcceptedMeetings,
+      exhibitorConnections: scannedExhibitors,
+      visitorConnections: scannedVisitors
+    }
   });
 });
 
@@ -128,27 +176,27 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
   const currentDate = new Date();
-  
+
   // Find events where user is registered
   let query = {
     isDeleted: false,
     isActive: true
   };
-  
+
   if (userType === 'exhibitor') {
     query['exhibitor.userId'] = userId;
   } else {
     query['visitor.userId'] = userId;
   }
-  
+
   const events = await Event.find(query)
     .populate('organizerId', 'name email companyName')
     .sort({ fromDate: 1 });
-  
+
   // Add status and connection count for each event
   const eventsWithDetails = await Promise.all(events.map(async (event) => {
     const eventObj = event.toObject();
-    
+
     // Add status
     const eventEndDate = new Date(event.toDate);
     if (eventEndDate < currentDate) {
@@ -161,37 +209,40 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
       eventObj.status = 'upcoming';
       eventObj.statusColor = 'green';
     }
-    
+
     // Get connection count for this event
-    const scans = await Scan.find({ 
-      scanner: userId, 
+    const scans = await Scan.find({
+      scanner: userId,
       userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
       eventId: event._id
     });
-    
+
     const uniqueScannedUsers = new Set();
     scans.forEach(scan => {
       scan.scannedUser.forEach(scannedUserId => {
         uniqueScannedUsers.add(scannedUserId.toString());
       });
     });
-    
+
     eventObj.totalConnections = uniqueScannedUsers.size;
-    
+
     // Add user's QR code for this event
-    const userRegistration = userType === 'exhibitor' 
+    const userRegistration = userType === 'exhibitor'
       ? event.exhibitor.find(e => e.userId.toString() === userId.toString())
       : event.visitor.find(v => v.userId.toString() === userId.toString());
-    
+
     eventObj.myQRCode = userRegistration?.qrCode;
     eventObj.registeredAt = userRegistration?.registeredAt;
-    
+
     return eventObj;
   }));
-  
+
   successResponse(res, {
-    totalEvents: eventsWithDetails.length,
-    events: eventsWithDetails
+    message: 'Registered events retrieved successfully',
+    data: {
+      totalEvents: eventsWithDetails.length,
+      events: eventsWithDetails
+    }
   });
 });
 
@@ -200,20 +251,20 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
   const currentDate = new Date();
-  
+
   // Get all scans by this user
-  const scans = await Scan.find({ 
-    scanner: userId, 
-    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor' 
+  const scans = await Scan.find({
+    scanner: userId,
+    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
   }).populate('eventId', 'title fromDate toDate location media');
-  
+
   // Get unique events with enhanced details
   const uniqueEvents = {};
   scans.forEach(scan => {
     const eventId = scan.eventId._id.toString();
     if (!uniqueEvents[eventId]) {
       const event = scan.eventId;
-      
+
       // Add status
       const eventEndDate = new Date(event.toDate);
       let status, statusColor;
@@ -227,7 +278,7 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
         status = 'upcoming';
         statusColor = 'green';
       }
-      
+
       uniqueEvents[eventId] = {
         eventId,
         title: event.title,
@@ -241,13 +292,13 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
         uniqueScannedUsers: new Set()
       };
     }
-    
+
     // Count unique scanned users
     scan.scannedUser.forEach(scannedUserId => {
       uniqueEvents[eventId].uniqueScannedUsers.add(scannedUserId.toString());
     });
   });
-  
+
   // Convert to array and finalize connection counts
   const attendedEvents = Object.values(uniqueEvents).map(event => ({
     eventId: event.eventId,
@@ -260,7 +311,7 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
     statusColor: event.statusColor,
     totalConnections: event.uniqueScannedUsers.size
   }));
-  
+
   successResponse(res, {
     totalEvents: attendedEvents.length,
     events: attendedEvents
@@ -272,17 +323,17 @@ const recordScan = asyncHandler(async (req, res) => {
   const { scannedUserId, scannedUserType, eventId } = req.body;
   const scannerId = req.user._id;
   const scannerType = req.user.type;
-  
+
   if (!scannedUserId || !scannedUserType || !eventId) {
-    return errorResponse(res, 'Scanned user ID, user type, and event ID are required', 400);
+    return successResponse(res, { message: 'Scanned user ID, user type, and event ID are required', data: 0 });
   }
-  
+
   // Validate event exists
   const event = await Event.findById(eventId);
   if (!event) {
-    return errorResponse(res, 'Event not found', 404);
+    return successResponse(res, { message: 'Event not found', data: 0 });
   }
-  
+
   // Validate scanned user exists
   let scannedUser;
   if (scannedUserType === 'exhibitor') {
@@ -290,18 +341,18 @@ const recordScan = asyncHandler(async (req, res) => {
   } else if (scannedUserType === 'visitor') {
     scannedUser = await Visitor.findById(scannedUserId);
   }
-  
+
   if (!scannedUser) {
-    return errorResponse(res, 'Scanned user not found', 404);
+    return successResponse(res, { message: 'Scanned user not found', data: 0 });
   }
-  
+
   // Check if scan record already exists for this scanner and event
   let scanRecord = await Scan.findOne({
     scanner: scannerId,
     userModel: scannerType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
     eventId
   });
-  
+
   if (scanRecord) {
     // Add scanned user if not already in the array
     if (!scanRecord.scannedUser.includes(scannedUserId)) {
@@ -318,13 +369,15 @@ const recordScan = asyncHandler(async (req, res) => {
     });
     await scanRecord.save();
   }
-  
+
   successResponse(res, {
     message: 'Scan recorded successfully',
-    scannedUser: {
-      id: scannedUser._id,
-      name: scannedUser.name || scannedUser.companyName,
-      type: scannedUserType
+    data: {
+      scannedUser: {
+        id: scannedUser._id,
+        name: scannedUser.name || scannedUser.companyName,
+        type: scannedUserType
+      }
     }
   });
 });
@@ -333,29 +386,29 @@ const recordScan = asyncHandler(async (req, res) => {
 const getScanStatistics = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
-  
+
   // Get all scans by this user
-  const scans = await Scan.find({ 
-    scanner: userId, 
-    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor' 
+  const scans = await Scan.find({
+    scanner: userId,
+    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
   }).populate('eventId', 'title');
-  
+
   // Calculate statistics
   const totalScans = scans.reduce((sum, scan) => sum + scan.scannedUser.length, 0);
   const totalEvents = new Set(scans.map(scan => scan.eventId._id.toString())).size;
-  
+
   // Get scans from today
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayScans = scans.filter(scan => scan.createdAt >= today);
   const scansToday = todayScans.reduce((sum, scan) => sum + scan.scannedUser.length, 0);
-  
+
   // Get scans from this week
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
   const weekScans = scans.filter(scan => scan.createdAt >= weekAgo);
   const scansThisWeek = weekScans.reduce((sum, scan) => sum + scan.scannedUser.length, 0);
-  
+
   successResponse(res, {
     totalConnections: totalScans,
     totalEvents,
@@ -373,7 +426,7 @@ const getScanStatistics = asyncHandler(async (req, res) => {
 const getScannedUserSlots = asyncHandler(async (req, res) => {
   const { eventId, scannedUserId, scannedUserType } = req.body;
   const currentUserId = req.user._id;
-  
+
   if (!eventId || !scannedUserId || !scannedUserType) {
     return errorResponse(res, 'Event ID, scanned user ID, and user type are required', 400);
   }
@@ -418,7 +471,7 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
     const slotDateKey = slot.start.toISOString().split('T')[0];
     return attendedDates.has(slotDateKey);
   });
-  
+
   // Group slots by date with color indicators
   const slotsByDate = {};
   const statusColors = {
@@ -429,7 +482,7 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
 
   // Count slots by status
   const statusCounts = { available: 0, requested: 0, booked: 0 };
-  
+
   filteredSlots.forEach(slot => {
     const dateKey = slot.start.toISOString().split('T')[0];
     if (!slotsByDate[dateKey]) {
@@ -445,7 +498,7 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
       isPending: slot.status === 'requested',
       isBooked: slot.status === 'booked'
     });
-    
+
     // Count status
     if (statusCounts.hasOwnProperty(slot.status)) {
       statusCounts[slot.status]++;
@@ -509,8 +562,8 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
     return errorResponse(res, 'User slots not found', 404);
   }
 
-  const slotIndex = userSlot.slots.findIndex(s => 
-    s.start.getTime() === new Date(slotStart).getTime() && 
+  const slotIndex = userSlot.slots.findIndex(s =>
+    s.start.getTime() === new Date(slotStart).getTime() &&
     s.status === 'available'
   );
 
@@ -644,7 +697,7 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   });
 
   if (userSlot) {
-    const slotIndex = userSlot.slots.findIndex(s => 
+    const slotIndex = userSlot.slots.findIndex(s =>
       s.meetingId && s.meetingId.toString() === meetingId
     );
 
@@ -756,32 +809,32 @@ const getConfirmedMeetings = asyncHandler(async (req, res) => {
 const getMobileDashboard = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
-  
+
   // Get total connections
-  const scans = await Scan.find({ 
-    scanner: userId, 
-    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor' 
+  const scans = await Scan.find({
+    scanner: userId,
+    userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
   });
-  
+
   const uniqueScannedUsers = new Set();
   scans.forEach(scan => {
     scan.scannedUser.forEach(scannedUserId => {
       uniqueScannedUsers.add(scannedUserId.toString());
     });
   });
-  
+
   const totalConnections = uniqueScannedUsers.size;
-  
+
   // Get total events attended
   const totalEvents = new Set(scans.map(scan => scan.eventId.toString())).size;
-  
+
   // Get pending meeting requests count
   const pendingRequests = await Meeting.countDocuments({
     requestedId: userId,
     requestedType: userType,
     status: 'pending'
   });
-  
+
   // Get confirmed meetings count
   const confirmedMeetings = await Meeting.countDocuments({
     $or: [
@@ -790,7 +843,7 @@ const getMobileDashboard = asyncHandler(async (req, res) => {
     ],
     status: 'accepted'
   });
-  
+
   successResponse(res, {
     totalConnections,
     totalEvents,
@@ -804,21 +857,21 @@ const getMobileDashboard = asyncHandler(async (req, res) => {
 const getMyProfile = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
-  
+
   let user;
   if (userType === 'exhibitor') {
     user = await Exhibitor.findById(userId).select('-otp -otpExpires');
   } else {
     user = await Visitor.findById(userId).select('-otp -otpExpires');
   }
-  
+
   if (!user) {
     return errorResponse(res, 'User not found', 404);
   }
-  
+
   const userResponse = user.toObject();
   userResponse.userType = userType;
-  
+
   successResponse(res, userResponse);
 });
 
@@ -827,28 +880,28 @@ const updateMyProfile = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const userType = req.user.type;
   const updateData = req.body;
-  
+
   // Remove sensitive fields that shouldn't be updated
   delete updateData.otp;
   delete updateData.otpExpires;
   delete updateData.isActive;
   delete updateData.isDeleted;
   delete updateData._id;
-  
+
   let user;
   if (userType === 'exhibitor') {
     user = await Exhibitor.findByIdAndUpdate(userId, updateData, { new: true }).select('-otp -otpExpires');
   } else {
     user = await Visitor.findByIdAndUpdate(userId, updateData, { new: true }).select('-otp -otpExpires');
   }
-  
+
   if (!user) {
     return errorResponse(res, 'User not found', 404);
   }
-  
+
   const userResponse = user.toObject();
   userResponse.userType = userType;
-  
+
   successResponse(res, userResponse);
 });
 
@@ -924,7 +977,7 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
         booked: []
       };
     }
-    
+
     slotsByDate[dateKey][slot.status].push({
       _id: slot._id,
       start: slot.start,
