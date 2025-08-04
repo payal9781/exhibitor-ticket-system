@@ -21,8 +21,49 @@ const createVisitor = asyncHandler(async (req, res) => {
 });
 
 const getVisitors = asyncHandler(async (req, res) => {
-  const visitors = await Visitor.find({isActive:true ,isDeleted: false});
-  successResponse(res, visitors);
+  const { search, status, page = 1, limit = 10 } = req.body;
+  let query = { isDeleted: false };
+  
+  // Filter by status
+  if (status && status !== 'all') {
+    query.isActive = status === 'active';
+  } else {
+    query.isActive = true; // Default to active visitors
+  }
+  
+  // Add search functionality
+  if (search && search.trim()) {
+    query.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+      { companyName: { $regex: search, $options: 'i' } },
+      { Sector: { $regex: search, $options: 'i' } },
+      { location: { $regex: search, $options: 'i' } },
+      { bio: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  // Calculate pagination
+  const skip = (page - 1) * limit;
+  const total = await Visitor.countDocuments(query);
+  
+  const visitors = await Visitor.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit));
+  
+  const response = {
+    visitors,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(total / limit),
+      totalItems: total,
+      itemsPerPage: parseInt(limit)
+    }
+  };
+  
+  successResponse(res, response);
 });
 
 const getVisitorById = asyncHandler(async (req, res) => {

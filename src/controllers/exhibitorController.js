@@ -10,19 +10,60 @@ const Meeting = require('../models/z-index').models.Meeting;
 const createExhibitor = asyncHandler(async (req, res) => {
   const exhibitor = new Exhibitor(req.body);
   const isExists = await Exhibitor.findOne({ email: exhibitor.email });
-  if(isExists && !isExists?.isDeleted && isExists?.isActive){
-     return errorResponse(res,'Email already exists',409)
+  if (isExists && !isExists?.isDeleted && isExists?.isActive) {
+    return errorResponse(res, 'Email already exists', 409)
   }
-  if(isExists && isExists?.isDeleted){
-    return errorResponse(res,'contact to adminitrator',409)
+  if (isExists && isExists?.isDeleted) {
+    return errorResponse(res, 'contact to adminitrator', 409)
   }
   await exhibitor.save();
   successResponse(res, exhibitor, 201);
 });
 
 const getExhibitors = asyncHandler(async (req, res) => {
-  const exhibitors = await Exhibitor.find({isActive:true ,isDeleted: false});
-  successResponse(res, exhibitors);
+  const { search, status, page = 1, limit = 10 } = req.body;
+  let query = { isDeleted: false };
+  
+  // Filter by status
+  if (status && status !== 'all') {
+    query.isActive = status === 'active';
+  } else {
+    query.isActive = true; // Default to active exhibitors
+  }
+  
+  // Add search functionality
+  if (search && search.trim()) {
+    query.$or = [
+      { companyName: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+      { Sector: { $regex: search, $options: 'i' } },
+      { location: { $regex: search, $options: 'i' } },
+      { bio: { $regex: search, $options: 'i' } },
+      { website: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  // Calculate pagination
+  const skip = (page - 1) * limit;
+  const total = await Exhibitor.countDocuments(query);
+  
+  const exhibitors = await Exhibitor.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit));
+  
+  const response = {
+    exhibitors,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(total / limit),
+      totalItems: total,
+      itemsPerPage: parseInt(limit)
+    }
+  };
+  
+  successResponse(res, response);
 });
 
 const getExhibitorById = asyncHandler(async (req, res) => {
@@ -31,7 +72,6 @@ const getExhibitorById = asyncHandler(async (req, res) => {
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
   successResponse(res, exhibitor);
 });
-
 const updateExhibitor = asyncHandler(async (req, res) => {
   const { id, ...updateData } = req.body; // Changed from params to body
   const exhibitor = await Exhibitor.findByIdAndUpdate(id, updateData, { new: true });
@@ -82,21 +122,21 @@ const getExhibitorStats = asyncHandler(async (req, res) => {
   const totalExhibitors = await Exhibitor.countDocuments({ isDeleted: false });
   const activeExhibitors = await Exhibitor.countDocuments({ isDeleted: false, isActive: true });
   const checkedInExhibitors = await Exhibitor.countDocuments({ isDeleted: false, isCheckedIn: true });
-  
+
   const stats = {
     totalExhibitors,
     activeExhibitors,
     checkedInExhibitors,
     inactiveExhibitors: totalExhibitors - activeExhibitors
   };
-  
+
   successResponse(res, stats);
 });
 
 // Get available booths for an event
 const getAvailableBooths = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  
+
   // Mock booth data - in real implementation, this would come from a Booth model
   const booths = [
     { id: 'A1', name: 'Booth A1', size: 'Large', price: 5000, available: true },
@@ -105,7 +145,7 @@ const getAvailableBooths = asyncHandler(async (req, res) => {
     { id: 'B1', name: 'Booth B1', size: 'Large', price: 5000, available: true },
     { id: 'B2', name: 'Booth B2', size: 'Medium', price: 3000, available: true }
   ];
-  
+
   const availableBooths = booths.filter(booth => booth.available);
   successResponse(res, availableBooths);
 });
@@ -114,14 +154,14 @@ const getAvailableBooths = asyncHandler(async (req, res) => {
 const checkInExhibitor = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const exhibitor = await Exhibitor.findByIdAndUpdate(
-    id, 
-    { 
-      isCheckedIn: true, 
-      checkInTime: new Date() 
-    }, 
+    id,
+    {
+      isCheckedIn: true,
+      checkInTime: new Date()
+    },
     { new: true }
   );
-  
+
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
   successResponse(res, exhibitor);
 });
@@ -130,14 +170,14 @@ const checkInExhibitor = asyncHandler(async (req, res) => {
 const checkOutExhibitor = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const exhibitor = await Exhibitor.findByIdAndUpdate(
-    id, 
-    { 
-      isCheckedIn: false, 
-      checkOutTime: new Date() 
-    }, 
+    id,
+    {
+      isCheckedIn: false,
+      checkOutTime: new Date()
+    },
     { new: true }
   );
-  
+
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
   successResponse(res, exhibitor);
 });
@@ -154,7 +194,7 @@ const getMyProfile = asyncHandler(async (req, res) => {
 // Update exhibitor profile (for mobile app)
 const updateMyProfile = asyncHandler(async (req, res) => {
   const { companyName, email, phone, bio, Sector, location, website } = req.body;
-  
+
   const exhibitor = await Exhibitor.findById(req.user._id);
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
 
@@ -179,7 +219,7 @@ const updateMyProfile = asyncHandler(async (req, res) => {
   if (website) exhibitor.website = website;
 
   await exhibitor.save();
-  
+
   const updatedExhibitor = await Exhibitor.findById(req.user._id).select('-password');
   successResponse(res, updatedExhibitor);
 });
@@ -208,7 +248,7 @@ const getMyEvents = asyncHandler(async (req, res) => {
   const eventsWithDetails = events.map(event => {
     const eventObj = event.toObject();
     const exhibitorData = event.exhibitor.find(ex => ex.userId.toString() === req.user._id);
-    
+
     // Add status
     const eventEndDate = new Date(event.toDate);
     if (eventEndDate < currentDate) {
@@ -235,7 +275,7 @@ const getMyEvents = asyncHandler(async (req, res) => {
 // Get exhibitor's event statistics (for mobile app)
 const getMyEventStats = asyncHandler(async (req, res) => {
   const currentDate = new Date();
-  
+
   const events = await Event.find({
     isDeleted: false,
     'exhibitor.userId': req.user._id
@@ -253,11 +293,11 @@ const getMyEventStats = asyncHandler(async (req, res) => {
   events.forEach(event => {
     const eventStartDate = new Date(event.fromDate);
     const eventEndDate = new Date(event.toDate);
-    
+
     if (event.isActive) {
       stats.activeEvents++;
     }
-    
+
     if (eventEndDate < currentDate) {
       stats.endedEvents++;
     } else if (eventStartDate <= currentDate && eventEndDate >= currentDate) {
@@ -285,7 +325,7 @@ const getMyEventStats = asyncHandler(async (req, res) => {
 // Get exhibitor's slots for a specific event (for mobile app)
 const getMyEventSlots = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  
+
   if (!eventId) return errorResponse(res, 'Event ID is required', 400);
 
   // Verify exhibitor is registered for this event
@@ -369,7 +409,7 @@ const getMyEventSlots = asyncHandler(async (req, res) => {
 // Toggle slot visibility (for mobile app)
 const toggleMySlotVisibility = asyncHandler(async (req, res) => {
   const { eventId, showSlots } = req.body;
-  
+
   if (!eventId || typeof showSlots !== 'boolean') {
     return errorResponse(res, 'Event ID and showSlots boolean are required', 400);
   }
@@ -393,7 +433,7 @@ const toggleMySlotVisibility = asyncHandler(async (req, res) => {
 // Get exhibitor's meetings for a specific event (for mobile app)
 const getMyEventMeetings = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  
+
   if (!eventId) return errorResponse(res, 'Event ID is required', 400);
 
   const meetings = await Meeting.find({
@@ -404,10 +444,10 @@ const getMyEventMeetings = asyncHandler(async (req, res) => {
     ],
     status: 'accepted'
   })
-  .populate('requesterId', 'name companyName email phone bio Sector')
-  .populate('requestedId', 'name companyName email phone bio Sector')
-  .populate('eventId', 'title location')
-  .sort({ slotStart: 1 });
+    .populate('requesterId', 'name companyName email phone bio Sector')
+    .populate('requestedId', 'name companyName email phone bio Sector')
+    .populate('eventId', 'title location')
+    .sort({ slotStart: 1 });
 
   // Group meetings by date
   const meetingsByDate = {};
@@ -418,15 +458,15 @@ const getMyEventMeetings = asyncHandler(async (req, res) => {
       meetingsByDate[date] = [];
     }
 
-    const otherParticipant = meeting.requesterId._id.toString() === req.user._id 
-      ? meeting.requestedId 
+    const otherParticipant = meeting.requesterId._id.toString() === req.user._id
+      ? meeting.requestedId
       : meeting.requesterId;
 
     const otherParticipantType = meeting.requesterType === 'exhibitor' && meeting.requesterId._id.toString() === req.user._id
       ? meeting.requestedType
       : meeting.requesterType === 'exhibitor' && meeting.requestedId._id.toString() === req.user._id
-      ? meeting.requesterType
-      : meeting.requestedType;
+        ? meeting.requesterType
+        : meeting.requestedType;
 
     meetingsByDate[date].push({
       _id: meeting._id,
@@ -457,7 +497,7 @@ const getMyEventMeetings = asyncHandler(async (req, res) => {
 // Get pending meeting requests for exhibitor (for mobile app)
 const getMyPendingRequests = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  
+
   let query = {
     requestedId: req.user._id,
     requestedType: 'exhibitor',
@@ -501,7 +541,7 @@ const getMyPendingRequests = asyncHandler(async (req, res) => {
 // Respond to meeting request (for mobile app)
 const respondToMeetingRequest = asyncHandler(async (req, res) => {
   const { meetingId, status } = req.body; // status: 'accepted' or 'rejected'
-  
+
   if (!meetingId || !['accepted', 'rejected'].includes(status)) {
     return errorResponse(res, 'Meeting ID and valid status (accepted/rejected) are required', 400);
   }
@@ -526,8 +566,8 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   });
 
   if (userSlot) {
-    const slotIndex = userSlot.slots.findIndex(s => 
-      s.start.getTime() === meeting.slotStart.getTime() && 
+    const slotIndex = userSlot.slots.findIndex(s =>
+      s.start.getTime() === meeting.slotStart.getTime() &&
       s.end.getTime() === meeting.slotEnd.getTime()
     );
 
@@ -550,15 +590,15 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { 
-  createExhibitor, 
-  getExhibitors, 
-  getExhibitorById, 
-  updateExhibitor, 
-  deleteExhibitor, 
-  getOrganizersEventWise, 
-  getEventsOrganizerWise, 
-  getParticipantsEventWise, 
+module.exports = {
+  createExhibitor,
+  getExhibitors,
+  getExhibitorById,
+  updateExhibitor,
+  deleteExhibitor,
+  getOrganizersEventWise,
+  getEventsOrganizerWise,
+  getParticipantsEventWise,
   getUserDetails,
   getExhibitorStats,
   getAvailableBooths,

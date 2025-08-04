@@ -16,7 +16,7 @@ const createEvent = asyncHandler(async (req, res) => {
 });
 
 const getEvents = asyncHandler(async (req, res) => {
-  const { organizerId, includeInactive = false } = req.body;
+  const { organizerId, includeInactive = false, search, page = 1, limit = 10 } = req.body;
   let query = { isDeleted: false };
   
   // Only include active events unless specifically requested
@@ -27,9 +27,24 @@ const getEvents = asyncHandler(async (req, res) => {
   if (req.user.type === 'organizer') query.organizerId = req.user._id;
   if (req.user.type === 'superadmin' && organizerId) query.organizerId = organizerId;
   
+  // Add search functionality
+  if (search && search.trim()) {
+    query.$or = [
+      { title: { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } },
+      { location: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  // Calculate pagination
+  const skip = (page - 1) * limit;
+  const total = await Event.countDocuments(query);
+  
   const events = await Event.find(query)
     .populate('organizerId', 'name email companyName')
-    .sort({ fromDate: -1 });
+    .sort({ fromDate: -1 })
+    .skip(skip)
+    .limit(parseInt(limit));
     
   // Add status indicators
   const currentDate = new Date();
@@ -51,7 +66,17 @@ const getEvents = asyncHandler(async (req, res) => {
     return eventObj;
   });
   
-  successResponse(res, eventsWithStatus);
+  const response = {
+    events: eventsWithStatus,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(total / limit),
+      totalItems: total,
+      itemsPerPage: parseInt(limit)
+    }
+  };
+  
+  successResponse(res, response);
 });
 
 const getEventById = asyncHandler(async (req, res) => {
