@@ -6,6 +6,43 @@ This guide provides comprehensive documentation for the mobile app APIs designed
 
 ## 🔐 Authentication
 
+### Mobile App Login
+```http
+POST /api/auth/login-app
+Content-Type: application/json
+
+{
+  "role": "exhibitor", // or "visitor"
+  "phone": "+1234567890",
+  "machineId": "unique_device_identifier"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "_id": "user_id",
+      "companyName": "Tech Corp", // for exhibitor
+      "name": "John Doe", // for visitor
+      "email": "contact@techcorp.com",
+      "phone": "+1234567890",
+      "role": "exhibitor",
+      "isActive": true
+    },
+    "token": "jwt_token_here",
+    "isVerified": true // false if machineId doesn't match or is first time
+  }
+}
+```
+
+**Machine ID Verification Logic:**
+- If `machineId` is empty in database → Update with provided `machineId`, return `isVerified: false`
+- If `machineId` matches stored value → Return `isVerified: true`
+- If `machineId` doesn't match → Return `isVerified: false`
+
 All mobile APIs require authentication using JWT tokens. Include the token in the Authorization header:
 
 ```

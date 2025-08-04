@@ -147,8 +147,13 @@ const checkOutExhibitor = asyncHandler(async (req, res) => {
 // Get exhibitor profile (for mobile app)
 const getMyProfile = asyncHandler(async (req, res) => {
   const exhibitor = await Exhibitor.findById(req.user._id).select('-password');
-  if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
-  successResponse(res, exhibitor);
+  if (!exhibitor) {
+    return successResponse(res, { message: 'Exhibitor not found', data: 0 });
+  }
+  successResponse(res, {
+    message: 'Profile retrieved successfully',
+    data: exhibitor
+  });
 });
 
 // Update exhibitor profile (for mobile app)
@@ -156,17 +161,23 @@ const updateMyProfile = asyncHandler(async (req, res) => {
   const { companyName, email, phone, bio, Sector, location, website } = req.body;
   
   const exhibitor = await Exhibitor.findById(req.user._id);
-  if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
+  if (!exhibitor) {
+    return successResponse(res, { message: 'Exhibitor not found', data: 0 });
+  }
 
   // Check if email or phone already exists (excluding current user)
   if (email && email !== exhibitor.email) {
     const existingEmail = await Exhibitor.findOne({ email, _id: { $ne: req.user._id } });
-    if (existingEmail) return errorResponse(res, 'Email already exists', 400);
+    if (existingEmail) {
+      return successResponse(res, { message: 'Email already exists', data: 0 });
+    }
   }
 
   if (phone && phone !== exhibitor.phone) {
     const existingPhone = await Exhibitor.findOne({ phone, _id: { $ne: req.user._id } });
-    if (existingPhone) return errorResponse(res, 'Phone number already exists', 400);
+    if (existingPhone) {
+      return successResponse(res, { message: 'Phone number already exists', data: 0 });
+    }
   }
 
   // Update fields
@@ -181,7 +192,10 @@ const updateMyProfile = asyncHandler(async (req, res) => {
   await exhibitor.save();
   
   const updatedExhibitor = await Exhibitor.findById(req.user._id).select('-password');
-  successResponse(res, updatedExhibitor);
+  successResponse(res, {
+    message: 'Profile updated successfully',
+    data: updatedExhibitor
+  });
 });
 
 // Get exhibitor's registered events (for mobile app)

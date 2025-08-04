@@ -24,4 +24,10 @@ const login = Joi.object({
   role: Joi.string().valid('superAdmin', 'organizer', 'exhibitor', 'visitor').required(),
 });
 
-module.exports = { register, login };
+const loginApp = Joi.object({
+  phone: Joi.string().required(),
+  machineId: Joi.string().required(),
+  role: Joi.string().valid('exhibitor', 'visitor').required(),
+});
+
+module.exports = { register, login, loginApp };
