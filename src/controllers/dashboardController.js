@@ -167,10 +167,15 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
       trend: `+${eventsThisMonth} this month`,
       trendUp: eventsThisMonth > 0
     },
-    activeUsers: {
-      value: activeUsers,
-      trend: `+${usersThisWeek} this week`,
-      trendUp: usersThisWeek > 0
+    totalExhibitors: {
+      value: totalExhibitors,
+      trend: `+${exhibitorsThisWeek} this week`,
+      trendUp: exhibitorsThisWeek > 0
+    },
+    totalVisitors: {
+      value: totalVisitors,
+      trend: `+${visitorsThisWeek} this week`,
+      trendUp: visitorsThisWeek > 0
     },
     platformRevenue: {
       value: `$${platformRevenue.toLocaleString()}`,
