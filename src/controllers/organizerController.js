@@ -3,19 +3,36 @@ const asyncHandler = require('express-async-handler');
 const Organizer = require('../models/Organizer');
 
 const createOrganizer = asyncHandler(async (req, res) => {
-  const organizer = new Organizer(req.body);
+  const { firstName, lastName, company, ...rest } = req.body;
+  
+  // Combine firstName and lastName into name field
+  const name = firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || '';
+  
+  // Map company to organizationName if provided
+  const organizationName = company || rest.organizationName || '';
+  
+  const organizerData = {
+    ...rest,
+    name,
+    organizationName
+  };
+  
+  const organizer = new Organizer(organizerData);
   await organizer.save();
-  successResponse(res, organizer, 201);
+  
+  // Return organizer with firstName and lastName for frontend compatibility
+  const response = {
+    ...organizer.toObject(),
+    firstName: firstName || '',
+    lastName: lastName || ''
+  };
+  
+  successResponse(res, response, 201);
 });
 
 const getOrganizers = asyncHandler(async (req, res) => {
-  const { search, status, page = 1, limit = 10 } = req.body;
+  const { search, page = 1, limit = 10 } = req.body;
   let query = { isDeleted: false };
-  
-  // Filter by status
-  if (status && status !== 'all') {
-    query.isActive = status === 'active';
-  }
   
   // Add search functionality
   if (search && search.trim()) {
@@ -76,46 +93,19 @@ const deleteOrganizer = asyncHandler(async (req, res) => {
 const getOrganizerStats = asyncHandler(async (req, res) => {
   const totalOrganizers = await Organizer.countDocuments({ isDeleted: false });
   const activeOrganizers = await Organizer.countDocuments({ isDeleted: false, isActive: true });
-  const premiumOrganizers = await Organizer.countDocuments({ isDeleted: false, subscription: 'premium' });
   
   const stats = {
     totalOrganizers,
     activeOrganizers,
-    premiumOrganizers,
     inactiveOrganizers: totalOrganizers - activeOrganizers
   };
   
   successResponse(res, stats);
 });
 
-// Change organizer status
-const changeOrganizerStatus = asyncHandler(async (req, res) => {
-  const { id, status } = req.body;
-  const organizer = await Organizer.findByIdAndUpdate(
-    id, 
-    { isActive: status === 'active' }, 
-    { new: true }
-  );
-  
-  if (!organizer) return errorResponse(res, 'Organizer not found', 404);
-  successResponse(res, organizer);
-});
 
-// Update subscription
-const updateSubscription = asyncHandler(async (req, res) => {
-  const { id, subscription, expiryDate } = req.body;
-  const organizer = await Organizer.findByIdAndUpdate(
-    id, 
-    { 
-      subscription, 
-      subscriptionExpiry: new Date(expiryDate) 
-    }, 
-    { new: true }
-  );
-  
-  if (!organizer) return errorResponse(res, 'Organizer not found', 404);
-  successResponse(res, organizer);
-});
+
+
 
 module.exports = { 
   createOrganizer, 
@@ -123,7 +113,5 @@ module.exports = {
   getOrganizerById, 
   updateOrganizer, 
   deleteOrganizer,
-  getOrganizerStats,
-  changeOrganizerStatus,
-  updateSubscription
+  getOrganizerStats
 };

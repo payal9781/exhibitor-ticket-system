@@ -13,9 +13,9 @@ const exhibitorSchema = new mongoose.Schema({
   website: { type: String },
   location: { type: String },
   socialMediaLinks: { type: Object },
-  machineId: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
+  machineId: { type: String ,default: ''},
   otp: { type: String },
   otpExpires: { type: Date }
 }, { timestamps: true });

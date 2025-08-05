@@ -12,7 +12,9 @@ const organizerSchema = new mongoose.Schema({
   avatar: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
-  extraDetails: { type: mongoose.Schema.Types.Mixed }
+  extraDetails: { type: mongoose.Schema.Types.Mixed },
+  resetPasswordToken: { type: String },
+  resetPasswordExpires: { type: Date }
 }, { timestamps: true });
 
 organizerSchema.pre('save', async function (next) {

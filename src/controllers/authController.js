@@ -204,4 +204,120 @@ const logout = asyncHandler(async (req, res) => {
   successResponse(res, { message: 'Logged out successfully' });
 });
 
-module.exports = { register, sendOtp, verifyOtp, login, loginApp, logout };
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email, role } = req.body;
+  
+  if (!email || !role) {
+    return errorResponse(res, 'Email and role are required', 400);
+  }
+
+  if (!['organizer', 'superAdmin'].includes(role)) {
+    return errorResponse(res, 'Invalid role for password reset', 400);
+  }
+
+  const Model = getModelByRole(role);
+  const user = await Model.findOne({ email });
+  
+  if (!user) {
+    // Don't reveal if user exists or not for security
+    return successResponse(res, { message: 'If an account with that email exists, a password reset link has been sent.' });
+  }
+
+  // Generate reset token
+  const crypto = require('crypto');
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const resetTokenExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  user.resetPasswordToken = resetToken;
+  user.resetPasswordExpires = resetTokenExpiry;
+  await user.save();
+
+  // Send email
+  const emailService = require('../services/emailService');
+  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+  
+  try {
+    await emailService.sendPasswordResetEmail(email, resetUrl, user.name || 'User');
+    successResponse(res, { message: 'If an account with that email exists, a password reset link has been sent.' });
+  } catch (error) {
+    // Clear the reset token if email fails
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+    
+    console.error('Failed to send password reset email:', error);
+    console.error('Email error details:', {
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      user: process.env.SMTP_USER,
+      secure: process.env.SMTP_SECURE
+    });
+    return errorResponse(res, 'Failed to send password reset email. Please try again later.', 500);
+  }
+});
+
+const verifyResetToken = asyncHandler(async (req, res) => {
+  const { token } = req.body;
+  
+  if (!token) {
+    return errorResponse(res, 'Reset token is required', 400);
+  }
+
+  // Check in both models
+  let user = await Organizer.findOne({
+    resetPasswordToken: token,
+    resetPasswordExpires: { $gt: Date.now() }
+  });
+
+  if (!user) {
+    user = await Superadmin.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() }
+    });
+  }
+
+  if (!user) {
+    return errorResponse(res, 'Invalid or expired reset token', 400);
+  }
+
+  successResponse(res, { message: 'Token is valid' });
+});
+
+const resetPassword = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  
+  if (!token || !password) {
+    return errorResponse(res, 'Token and password are required', 400);
+  }
+
+  if (password.length < 8) {
+    return errorResponse(res, 'Password must be at least 8 characters long', 400);
+  }
+
+  // Check in both models
+  let user = await Organizer.findOne({
+    resetPasswordToken: token,
+    resetPasswordExpires: { $gt: Date.now() }
+  });
+
+  if (!user) {
+    user = await Superadmin.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() }
+    });
+  }
+
+  if (!user) {
+    return errorResponse(res, 'Invalid or expired reset token', 400);
+  }
+
+  // Update password
+  user.password = password;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+  await user.save();
+
+  successResponse(res, { message: 'Password has been reset successfully' });
+});
+
+module.exports = { register, sendOtp, verifyOtp, login, loginApp, logout, forgotPassword, verifyResetToken, resetPassword };

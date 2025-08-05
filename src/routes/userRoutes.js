@@ -13,7 +13,7 @@ const {
   getUserStats,
   changeUserStatus,
   changeUserRole,
-  resetPassword,
+  // resetPassword, // Commented out - using auth controller version instead
   bulkUpdateUserStatus,
   exportUsers
 } = require('../controllers/userController');
@@ -41,7 +41,7 @@ router.post('/get', authMiddleware(['organizer', 'superAdmin']), getUser);
 router.post('/stats', authMiddleware(['organizer', 'superAdmin']), getUserStats);
 router.post('/change-status', authMiddleware(['organizer', 'superAdmin']), changeUserStatus);
 router.post('/change-role', authMiddleware(['superAdmin']), changeUserRole);
-router.post('/reset-password', authMiddleware(['organizer', 'superAdmin']), resetPassword);
+// router.post('/reset-password', authMiddleware(['organizer', 'superAdmin']), resetPassword);
 router.post('/bulk-update-status', authMiddleware(['organizer', 'superAdmin']), bulkUpdateUserStatus);
 router.post('/export', authMiddleware(['organizer', 'superAdmin']), exportUsers);
 
