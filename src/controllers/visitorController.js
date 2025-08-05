@@ -21,37 +21,113 @@ const createVisitor = asyncHandler(async (req, res) => {
 });
 
 const getVisitors = asyncHandler(async (req, res) => {
-  const { search, status, page = 1, limit = 10 } = req.body;
-  let query = { isDeleted: false };
+  const { search, status, page = 1, limit = 10, organizerId } = req.body;
+  const userRole = req.user.role;
+  const currentUserId = req.user.id;
   
-  // Filter by status
-  if (status && status !== 'all') {
-    query.isActive = status === 'active';
+  let visitors;
+  let total;
+  
+  // If organizer is requesting, filter by their events only
+  if (userRole === 'organizer' || organizerId) {
+    const targetOrganizerId = organizerId || currentUserId;
+    
+    // Get all events organized by this organizer
+    const organizerEvents = await Event.find({ 
+      organizerId: targetOrganizerId, 
+      isDeleted: false 
+    }).select('_id');
+    
+    const eventIds = organizerEvents.map(event => event._id);
+    
+    // Find visitors who have attended these events
+    const attendedVisitors = await Event.aggregate([
+      { $match: { _id: { $in: eventIds } } },
+      { $unwind: '$visitor' },
+      { $group: { _id: '$visitor.userId' } }
+    ]);
+    
+    const visitorIds = attendedVisitors.map(item => item._id);
+    
+    if (visitorIds.length === 0) {
+      return successResponse(res, {
+        visitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+    
+    let query = { 
+      _id: { $in: visitorIds },
+      isDeleted: false 
+    };
+    
+    // Filter by status
+    if (status && status !== 'all') {
+      query.isActive = status === 'active';
+    } else {
+      query.isActive = true;
+    }
+    
+    // Add search functionality
+    if (search && search.trim()) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { companyName: { $regex: search, $options: 'i' } },
+        { Sector: { $regex: search, $options: 'i' } },
+        { location: { $regex: search, $options: 'i' } },
+        { bio: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+    total = await Visitor.countDocuments(query);
+    
+    visitors = await Visitor.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+      
   } else {
-    query.isActive = true; // Default to active visitors
+    // SuperAdmin can see all visitors
+    let query = { isDeleted: false };
+    
+    // Filter by status
+    if (status && status !== 'all') {
+      query.isActive = status === 'active';
+    } else {
+      query.isActive = true;
+    }
+    
+    // Add search functionality
+    if (search && search.trim()) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { companyName: { $regex: search, $options: 'i' } },
+        { Sector: { $regex: search, $options: 'i' } },
+        { location: { $regex: search, $options: 'i' } },
+        { bio: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+    total = await Visitor.countDocuments(query);
+    
+    visitors = await Visitor.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
   }
-  
-  // Add search functionality
-  if (search && search.trim()) {
-    query.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
-      { phone: { $regex: search, $options: 'i' } },
-      { companyName: { $regex: search, $options: 'i' } },
-      { Sector: { $regex: search, $options: 'i' } },
-      { location: { $regex: search, $options: 'i' } },
-      { bio: { $regex: search, $options: 'i' } }
-    ];
-  }
-  
-  // Calculate pagination
-  const skip = (page - 1) * limit;
-  const total = await Visitor.countDocuments(query);
-  
-  const visitors = await Visitor.find(query)
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(parseInt(limit));
   
   const response = {
     visitors,
@@ -590,6 +666,150 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   });
 });
 
+// Get visitors with their attendance details for organizer
+const getVisitorsWithAttendance = asyncHandler(async (req, res) => {
+  const { search, status, page = 1, limit = 10, eventId } = req.body;
+  const userRole = req.user.role;
+  const currentUserId = req.user.id;
+  
+  if (userRole !== 'organizer' && userRole !== 'superAdmin') {
+    return errorResponse(res, 'Access denied', 403);
+  }
+  
+  let eventIds = [];
+  
+  if (eventId) {
+    // Get specific event
+    const event = await Event.findOne({ 
+      _id: eventId, 
+      organizerId: userRole === 'organizer' ? currentUserId : undefined,
+      isDeleted: false 
+    });
+    if (!event) {
+      return errorResponse(res, 'Event not found', 404);
+    }
+    eventIds = [eventId];
+  } else {
+    // Get all events for this organizer
+    const organizerEvents = await Event.find({ 
+      organizerId: userRole === 'organizer' ? currentUserId : undefined,
+      isDeleted: false 
+    }).select('_id');
+    eventIds = organizerEvents.map(event => event._id);
+  }
+  
+  if (eventIds.length === 0) {
+    return successResponse(res, {
+      visitors: [],
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: 0,
+        totalItems: 0,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  }
+  
+  // Get visitors with their attendance details
+  const visitorsWithAttendance = await Event.aggregate([
+    { $match: { _id: { $in: eventIds } } },
+    { $unwind: '$visitor' },
+    {
+      $lookup: {
+        from: 'visitors',
+        localField: 'visitor.userId',
+        foreignField: '_id',
+        as: 'visitorDetails'
+      }
+    },
+    { $unwind: '$visitorDetails' },
+    {
+      $match: {
+        'visitorDetails.isDeleted': false,
+        ...(status && status !== 'all' ? { 'visitorDetails.isActive': status === 'active' } : { 'visitorDetails.isActive': true })
+      }
+    },
+    {
+      $group: {
+        _id: '$visitor.userId',
+        visitor: { $first: '$visitorDetails' },
+        events: {
+          $push: {
+            eventId: '$_id',
+            eventTitle: '$title',
+            eventLocation: '$location',
+            eventFromDate: '$fromDate',
+            eventToDate: '$toDate',
+            registeredAt: '$visitor.registeredAt',
+            qrCode: '$visitor.qrCode'
+          }
+        },
+        totalEvents: { $sum: 1 }
+      }
+    },
+    {
+      $lookup: {
+        from: 'attendances',
+        let: { visitorId: '$_id', eventIds: eventIds },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$userId', '$$visitorId'] },
+                  { $eq: ['$userModel', 'Visitor'] },
+                  { $in: ['$eventId', '$$eventIds'] }
+                ]
+              }
+            }
+          }
+        ],
+        as: 'attendanceRecords'
+      }
+    },
+    {
+      $addFields: {
+        totalAttendance: { $size: '$attendanceRecords' },
+        lastAttendance: {
+          $max: '$attendanceRecords.attendanceDate'
+        }
+      }
+    }
+  ]);
+  
+  // Apply search filter
+  let filteredVisitors = visitorsWithAttendance;
+  if (search && search.trim()) {
+    const searchRegex = new RegExp(search, 'i');
+    filteredVisitors = visitorsWithAttendance.filter(item => 
+      searchRegex.test(item.visitor.name) ||
+      searchRegex.test(item.visitor.email) ||
+      searchRegex.test(item.visitor.phone) ||
+      searchRegex.test(item.visitor.companyName) ||
+      searchRegex.test(item.visitor.Sector) ||
+      searchRegex.test(item.visitor.location) ||
+      searchRegex.test(item.visitor.bio)
+    );
+  }
+  
+  // Apply pagination
+  const total = filteredVisitors.length;
+  const skip = (page - 1) * limit;
+  const paginatedVisitors = filteredVisitors.slice(skip, skip + parseInt(limit));
+  
+  const response = {
+    visitors: paginatedVisitors,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(total / limit),
+      totalItems: total,
+      itemsPerPage: parseInt(limit)
+    }
+  };
+  
+  successResponse(res, response);
+});
+
 module.exports = { 
   createVisitor, 
   getVisitors, 
@@ -604,6 +824,7 @@ module.exports = {
   checkInVisitor,
   checkOutVisitor,
   bulkCheckIn,
+  getVisitorsWithAttendance,
   // Mobile App APIs
   getMyProfile,
   updateMyProfile,

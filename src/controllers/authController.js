@@ -257,7 +257,8 @@ const forgotPassword = asyncHandler(async (req, res) => {
 });
 
 const verifyResetToken = asyncHandler(async (req, res) => {
-  const { token } = req.body;
+  // Get token from either request body or URL parameter
+  const token = req.body.token || req.params.token;
   
   if (!token) {
     return errorResponse(res, 'Reset token is required', 400);
@@ -280,7 +281,13 @@ const verifyResetToken = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Invalid or expired reset token', 400);
   }
 
-  successResponse(res, { message: 'Token is valid' });
+  successResponse(res, { 
+    message: 'Token is valid',
+    data: {
+      email: user.email,
+      name: user.name
+    }
+  });
 });
 
 const resetPassword = asyncHandler(async (req, res) => {

@@ -14,7 +14,8 @@ const {
   getVisitorStats,
   checkInVisitor,
   checkOutVisitor,
-  bulkCheckIn
+  bulkCheckIn,
+  getVisitorsWithAttendance
 } = require('../controllers/visitorController');
 
 router.post('/create', authMiddleware(['organizer', 'superAdmin']), createVisitor);
@@ -30,5 +31,6 @@ router.post('/stats', authMiddleware(['organizer', 'superAdmin']), getVisitorSta
 router.post('/check-in', authMiddleware(['organizer', 'superAdmin']), checkInVisitor);
 router.post('/check-out', authMiddleware(['organizer', 'superAdmin']), checkOutVisitor);
 router.post('/bulk-check-in', authMiddleware(['organizer', 'superAdmin']), bulkCheckIn);
+router.post('/list-with-attendance', authMiddleware(['organizer', 'superAdmin']), getVisitorsWithAttendance);
 
 module.exports = router;

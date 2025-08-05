@@ -253,8 +253,171 @@ function getTimeAgo(date) {
   }
 }
 
+// Get organizer's attendee overview
+const getOrganizerAttendeeOverview = asyncHandler(async (req, res) => {
+  const organizerId = req.user._id;
+  
+  // Get all events for this organizer
+  const organizerEvents = await Event.find({ 
+    organizerId, 
+    isDeleted: false 
+  }).select('_id title fromDate toDate');
+  
+  const eventIds = organizerEvents.map(event => event._id);
+  
+  if (eventIds.length === 0) {
+    return successResponse(res, {
+      totalEvents: 0,
+      totalExhibitors: 0,
+      totalVisitors: 0,
+      recentAttendees: [],
+      eventBreakdown: []
+    });
+  }
+  
+  // Get exhibitors who attended organizer's events
+  const exhibitorAttendance = await Event.aggregate([
+    { $match: { _id: { $in: eventIds } } },
+    { $unwind: '$exhibitor' },
+    {
+      $lookup: {
+        from: 'exhibitors',
+        localField: 'exhibitor.userId',
+        foreignField: '_id',
+        as: 'exhibitorDetails'
+      }
+    },
+    { $unwind: '$exhibitorDetails' },
+    {
+      $match: {
+        'exhibitorDetails.isDeleted': false,
+        'exhibitorDetails.isActive': true
+      }
+    },
+    {
+      $group: {
+        _id: '$exhibitor.userId',
+        exhibitor: { $first: '$exhibitorDetails' },
+        events: { $push: { eventId: '$_id', title: '$title', registeredAt: '$exhibitor.registeredAt' } },
+        totalEvents: { $sum: 1 },
+        lastRegistration: { $max: '$exhibitor.registeredAt' }
+      }
+    }
+  ]);
+  
+  // Get visitors who attended organizer's events
+  const visitorAttendance = await Event.aggregate([
+    { $match: { _id: { $in: eventIds } } },
+    { $unwind: '$visitor' },
+    {
+      $lookup: {
+        from: 'visitors',
+        localField: 'visitor.userId',
+        foreignField: '_id',
+        as: 'visitorDetails'
+      }
+    },
+    { $unwind: '$visitorDetails' },
+    {
+      $match: {
+        'visitorDetails.isDeleted': false,
+        'visitorDetails.isActive': true
+      }
+    },
+    {
+      $group: {
+        _id: '$visitor.userId',
+        visitor: { $first: '$visitorDetails' },
+        events: { $push: { eventId: '$_id', title: '$title', registeredAt: '$visitor.registeredAt' } },
+        totalEvents: { $sum: 1 },
+        lastRegistration: { $max: '$visitor.registeredAt' }
+      }
+    }
+  ]);
+  
+  // Get event breakdown
+  const eventBreakdown = await Event.aggregate([
+    { $match: { _id: { $in: eventIds } } },
+    {
+      $project: {
+        title: 1,
+        fromDate: 1,
+        toDate: 1,
+        exhibitorCount: { $size: '$exhibitor' },
+        visitorCount: { $size: '$visitor' },
+        totalAttendees: { $add: [{ $size: '$exhibitor' }, { $size: '$visitor' }] }
+      }
+    },
+    { $sort: { fromDate: -1 } }
+  ]);
+  
+  // Get recent attendees (last 10)
+  const recentAttendees = [];
+  
+  // Add recent exhibitors
+  exhibitorAttendance
+    .sort((a, b) => new Date(b.lastRegistration) - new Date(a.lastRegistration))
+    .slice(0, 5)
+    .forEach(item => {
+      recentAttendees.push({
+        type: 'exhibitor',
+        name: item.exhibitor.companyName,
+        email: item.exhibitor.email,
+        registeredAt: item.lastRegistration,
+        totalEvents: item.totalEvents
+      });
+    });
+  
+  // Add recent visitors
+  visitorAttendance
+    .sort((a, b) => new Date(b.lastRegistration) - new Date(a.lastRegistration))
+    .slice(0, 5)
+    .forEach(item => {
+      recentAttendees.push({
+        type: 'visitor',
+        name: item.visitor.name,
+        email: item.visitor.email,
+        registeredAt: item.lastRegistration,
+        totalEvents: item.totalEvents
+      });
+    });
+  
+  // Sort recent attendees by registration date
+  recentAttendees.sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
+  
+  const overview = {
+    totalEvents: organizerEvents.length,
+    totalExhibitors: exhibitorAttendance.length,
+    totalVisitors: visitorAttendance.length,
+    totalAttendees: exhibitorAttendance.length + visitorAttendance.length,
+    recentAttendees: recentAttendees.slice(0, 10),
+    eventBreakdown: eventBreakdown,
+    topExhibitors: exhibitorAttendance
+      .sort((a, b) => b.totalEvents - a.totalEvents)
+      .slice(0, 5)
+      .map(item => ({
+        name: item.exhibitor.companyName,
+        email: item.exhibitor.email,
+        eventsAttended: item.totalEvents,
+        sector: item.exhibitor.Sector
+      })),
+    topVisitors: visitorAttendance
+      .sort((a, b) => b.totalEvents - a.totalEvents)
+      .slice(0, 5)
+      .map(item => ({
+        name: item.visitor.name,
+        email: item.visitor.email,
+        eventsAttended: item.totalEvents,
+        company: item.visitor.companyName
+      }))
+  };
+  
+  successResponse(res, overview);
+});
+
 module.exports = {
   getOrganizerDashboardStats,
   getSuperAdminDashboardStats,
-  getRecentActivity
+  getRecentActivity,
+  getOrganizerAttendeeOverview
 };

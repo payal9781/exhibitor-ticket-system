@@ -14,7 +14,8 @@ const {
   getExhibitorStats,
   getAvailableBooths,
   checkInExhibitor,
-  checkOutExhibitor
+  checkOutExhibitor,
+  getExhibitorsWithAttendance
 } = require('../controllers/exhibitorController');
 
 router.post('/create', authMiddleware(['organizer', 'superAdmin']), createExhibitor);
@@ -30,5 +31,6 @@ router.post('/stats', authMiddleware(['organizer', 'superAdmin']), getExhibitorS
 router.post('/available-booths', authMiddleware(['organizer', 'superAdmin']), getAvailableBooths);
 router.post('/check-in', authMiddleware(['organizer', 'superAdmin']), checkInExhibitor);
 router.post('/check-out', authMiddleware(['organizer', 'superAdmin']), checkOutExhibitor);
+router.post('/list-with-attendance', authMiddleware(['organizer', 'superAdmin']), getExhibitorsWithAttendance);
 
 module.exports = router;

@@ -21,37 +21,113 @@ const createExhibitor = asyncHandler(async (req, res) => {
 });
 
 const getExhibitors = asyncHandler(async (req, res) => {
-  const { search, status, page = 1, limit = 10 } = req.body;
-  let query = { isDeleted: false };
+  const { search, status, page = 1, limit = 10, organizerId } = req.body;
+  const userRole = req.user.role;
+  const currentUserId = req.user.id;
   
-  // Filter by status
-  if (status && status !== 'all') {
-    query.isActive = status === 'active';
+  let exhibitors;
+  let total;
+  
+  // If organizer is requesting, filter by their events only
+  if (userRole === 'organizer' || organizerId) {
+    const targetOrganizerId = organizerId || currentUserId;
+    
+    // Get all events organized by this organizer
+    const organizerEvents = await Event.find({ 
+      organizerId: targetOrganizerId, 
+      isDeleted: false 
+    }).select('_id');
+    
+    const eventIds = organizerEvents.map(event => event._id);
+    
+    // Find exhibitors who have attended these events
+    const attendedExhibitors = await Event.aggregate([
+      { $match: { _id: { $in: eventIds } } },
+      { $unwind: '$exhibitor' },
+      { $group: { _id: '$exhibitor.userId' } }
+    ]);
+    
+    const exhibitorIds = attendedExhibitors.map(item => item._id);
+    
+    if (exhibitorIds.length === 0) {
+      return successResponse(res, {
+        exhibitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+    
+    let query = { 
+      _id: { $in: exhibitorIds },
+      isDeleted: false 
+    };
+    
+    // Filter by status
+    if (status && status !== 'all') {
+      query.isActive = status === 'active';
+    } else {
+      query.isActive = true;
+    }
+    
+    // Add search functionality
+    if (search && search.trim()) {
+      query.$or = [
+        { companyName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { Sector: { $regex: search, $options: 'i' } },
+        { location: { $regex: search, $options: 'i' } },
+        { bio: { $regex: search, $options: 'i' } },
+        { website: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+    total = await Exhibitor.countDocuments(query);
+    
+    exhibitors = await Exhibitor.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+      
   } else {
-    query.isActive = true; // Default to active exhibitors
+    // SuperAdmin can see all exhibitors
+    let query = { isDeleted: false };
+    
+    // Filter by status
+    if (status && status !== 'all') {
+      query.isActive = status === 'active';
+    } else {
+      query.isActive = true;
+    }
+    
+    // Add search functionality
+    if (search && search.trim()) {
+      query.$or = [
+        { companyName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { Sector: { $regex: search, $options: 'i' } },
+        { location: { $regex: search, $options: 'i' } },
+        { bio: { $regex: search, $options: 'i' } },
+        { website: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+    total = await Exhibitor.countDocuments(query);
+    
+    exhibitors = await Exhibitor.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
   }
-  
-  // Add search functionality
-  if (search && search.trim()) {
-    query.$or = [
-      { companyName: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
-      { phone: { $regex: search, $options: 'i' } },
-      { Sector: { $regex: search, $options: 'i' } },
-      { location: { $regex: search, $options: 'i' } },
-      { bio: { $regex: search, $options: 'i' } },
-      { website: { $regex: search, $options: 'i' } }
-    ];
-  }
-  
-  // Calculate pagination
-  const skip = (page - 1) * limit;
-  const total = await Exhibitor.countDocuments(query);
-  
-  const exhibitors = await Exhibitor.find(query)
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(parseInt(limit));
   
   const response = {
     exhibitors,
@@ -604,6 +680,150 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   });
 });
 
+// Get exhibitors with their attendance details for organizer
+const getExhibitorsWithAttendance = asyncHandler(async (req, res) => {
+  const { search, status, page = 1, limit = 10, eventId } = req.body;
+  const userRole = req.user.role;
+  const currentUserId = req.user.id;
+  
+  if (userRole !== 'organizer' && userRole !== 'superAdmin') {
+    return errorResponse(res, 'Access denied', 403);
+  }
+  
+  let eventIds = [];
+  
+  if (eventId) {
+    // Get specific event
+    const event = await Event.findOne({ 
+      _id: eventId, 
+      organizerId: userRole === 'organizer' ? currentUserId : undefined,
+      isDeleted: false 
+    });
+    if (!event) {
+      return errorResponse(res, 'Event not found', 404);
+    }
+    eventIds = [eventId];
+  } else {
+    // Get all events for this organizer
+    const organizerEvents = await Event.find({ 
+      organizerId: userRole === 'organizer' ? currentUserId : undefined,
+      isDeleted: false 
+    }).select('_id');
+    eventIds = organizerEvents.map(event => event._id);
+  }
+  
+  if (eventIds.length === 0) {
+    return successResponse(res, {
+      exhibitors: [],
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: 0,
+        totalItems: 0,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  }
+  
+  // Get exhibitors with their attendance details
+  const exhibitorsWithAttendance = await Event.aggregate([
+    { $match: { _id: { $in: eventIds } } },
+    { $unwind: '$exhibitor' },
+    {
+      $lookup: {
+        from: 'exhibitors',
+        localField: 'exhibitor.userId',
+        foreignField: '_id',
+        as: 'exhibitorDetails'
+      }
+    },
+    { $unwind: '$exhibitorDetails' },
+    {
+      $match: {
+        'exhibitorDetails.isDeleted': false,
+        ...(status && status !== 'all' ? { 'exhibitorDetails.isActive': status === 'active' } : { 'exhibitorDetails.isActive': true })
+      }
+    },
+    {
+      $group: {
+        _id: '$exhibitor.userId',
+        exhibitor: { $first: '$exhibitorDetails' },
+        events: {
+          $push: {
+            eventId: '$_id',
+            eventTitle: '$title',
+            eventLocation: '$location',
+            eventFromDate: '$fromDate',
+            eventToDate: '$toDate',
+            registeredAt: '$exhibitor.registeredAt',
+            qrCode: '$exhibitor.qrCode'
+          }
+        },
+        totalEvents: { $sum: 1 }
+      }
+    },
+    {
+      $lookup: {
+        from: 'attendances',
+        let: { exhibitorId: '$_id', eventIds: eventIds },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$userId', '$$exhibitorId'] },
+                  { $eq: ['$userModel', 'Exhibitor'] },
+                  { $in: ['$eventId', '$$eventIds'] }
+                ]
+              }
+            }
+          }
+        ],
+        as: 'attendanceRecords'
+      }
+    },
+    {
+      $addFields: {
+        totalAttendance: { $size: '$attendanceRecords' },
+        lastAttendance: {
+          $max: '$attendanceRecords.attendanceDate'
+        }
+      }
+    }
+  ]);
+  
+  // Apply search filter
+  let filteredExhibitors = exhibitorsWithAttendance;
+  if (search && search.trim()) {
+    const searchRegex = new RegExp(search, 'i');
+    filteredExhibitors = exhibitorsWithAttendance.filter(item => 
+      searchRegex.test(item.exhibitor.companyName) ||
+      searchRegex.test(item.exhibitor.email) ||
+      searchRegex.test(item.exhibitor.phone) ||
+      searchRegex.test(item.exhibitor.Sector) ||
+      searchRegex.test(item.exhibitor.location) ||
+      searchRegex.test(item.exhibitor.bio) ||
+      searchRegex.test(item.exhibitor.website)
+    );
+  }
+  
+  // Apply pagination
+  const total = filteredExhibitors.length;
+  const skip = (page - 1) * limit;
+  const paginatedExhibitors = filteredExhibitors.slice(skip, skip + parseInt(limit));
+  
+  const response = {
+    exhibitors: paginatedExhibitors,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(total / limit),
+      totalItems: total,
+      itemsPerPage: parseInt(limit)
+    }
+  };
+  
+  successResponse(res, response);
+});
+
 module.exports = {
   createExhibitor,
   getExhibitors,
@@ -618,6 +838,7 @@ module.exports = {
   getAvailableBooths,
   checkInExhibitor,
   checkOutExhibitor,
+  getExhibitorsWithAttendance,
   // Mobile App APIs
   getMyProfile,
   updateMyProfile,

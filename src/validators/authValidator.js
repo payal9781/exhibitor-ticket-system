@@ -30,4 +30,18 @@ const loginApp = Joi.object({
   role: Joi.string().valid('exhibitor', 'visitor').required(),
 });
 
-module.exports = { register, login, loginApp };
+const forgotPassword = Joi.object({
+  email: Joi.string().email().required(),
+  role: Joi.string().valid('organizer', 'superAdmin').required(),
+});
+
+const verifyResetToken = Joi.object({
+  token: Joi.string().required(),
+});
+
+const resetPassword = Joi.object({
+  token: Joi.string().required(),
+  password: Joi.string().min(8).required(),
+});
+
+module.exports = { register, login, loginApp, forgotPassword, verifyResetToken, resetPassword };

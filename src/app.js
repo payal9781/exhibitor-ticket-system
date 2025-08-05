@@ -68,6 +68,7 @@ app.get('/register/:registrationLink', async (req, res) => {
 });
 
 app.use('/api/v1', require('./routes/index'));
+
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 app.use(errorMiddleware);
 
