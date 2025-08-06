@@ -331,7 +331,7 @@ const getMyEvents = asyncHandler(async (req, res) => {
   }
 
   const events = await Event.find(query)
-    .populate('organizerId', 'name email companyName')
+    .populate('organizerId', 'name email organizationName')
     .sort({ fromDate: 1 });
 
   // Add status and QR code for each event

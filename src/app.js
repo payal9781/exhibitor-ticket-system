@@ -34,7 +34,7 @@ app.get('/register/:registrationLink', async (req, res) => {
     const event = await Event.findOne({ 
       registrationLink, 
       isDeleted: false 
-    }).populate('organizerId', 'name email companyName');
+    }).populate('organizerId', 'name email organizationName');
     
     if (!event) {
       return res.status(404).render('error', { 

@@ -13,7 +13,7 @@ const getEventByRegistrationLink = asyncHandler(async (req, res) => {
   const event = await Event.findOne({ 
     registrationLink, 
     isDeleted: false 
-  }).populate('organizerId', 'name email companyName');
+  }).populate('organizerId', 'name email organizationName');
   
   if (!event) {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
@@ -341,7 +341,7 @@ const getUpcomingEventsForRegistration = asyncHandler(async (req, res) => {
     fromDate: { $gte: currentDate } // Only upcoming events
   })
   .select('_id title fromDate toDate location registrationLink')
-  .populate('organizerId', 'name companyName')
+  .populate('organizerId', 'name organizationName')
   .sort({ fromDate: 1 })
   .limit(20);
 

@@ -41,7 +41,7 @@ const getEvents = asyncHandler(async (req, res) => {
   const total = await Event.countDocuments(query);
   
   const events = await Event.find(query)
-    .populate('organizerId', 'name email companyName')
+    .populate('organizerId', 'name email organizationName')
     .sort({ fromDate: -1 })
     .skip(skip)
     .limit(parseInt(limit));
@@ -81,7 +81,7 @@ const getEvents = asyncHandler(async (req, res) => {
 
 const getEventById = asyncHandler(async (req, res) => {
   const { id } = req.body;
-  const event = await Event.findById(id).populate('organizerId', 'name email companyName');
+  const event = await Event.findById(id).populate('organizerId', 'name email organizationName');
   if (!event) return errorResponse(res, 'Event not found', 404);
   if (req.user.type === 'organizer' && event.organizerId._id.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
   successResponse(res, event);
