@@ -100,6 +100,11 @@ const updateEvent = asyncHandler(async (req, res) => {
 const deleteEvent = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const event = await Event.findById(id);
+
+  if(event.exhibitor.length > 0 || event.visitor.length > 0){
+    return successResponse(res, { message: 'Event has exhibitors or visitors, so it cannot be deleted', status: 400 });
+  }
+
   if (!event) return errorResponse(res, 'Event not found', 404);
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
   event.isDeleted = true;
