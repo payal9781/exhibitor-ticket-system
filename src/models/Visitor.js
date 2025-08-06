@@ -14,7 +14,8 @@ const visitorSchema = new mongoose.Schema({
   website: { type: String },
   location: { type: String },
   socialMediaLinks: { type: Object },
-  isActive: { type: Boolean, default: false },
+  machineId: { type: String, default: '' },
+  isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
   otp: { type: String },
   otpExpires: { type: Date }
@@ -33,4 +34,4 @@ visitorSchema.methods.generateAccessToken = function () {
     }
   );
 };
-module.exports = mongoose.model('Visitor', visitorSchema);
+module.exports = mongoose.models.Visitor || mongoose.model('Visitor', visitorSchema);

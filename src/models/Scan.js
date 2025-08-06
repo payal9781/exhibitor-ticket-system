@@ -8,4 +8,4 @@ const scanSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
 }, { timestamps: true });
 
-module.exports = mongoose.model('Scan', scanSchema);
+module.exports = mongoose.models.Scan || mongoose.model('Scan', scanSchema);

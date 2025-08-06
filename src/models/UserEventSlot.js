@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const userEventSlotSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, required: true },
-    userType: { type: String, enum: ['Visitor', 'Exhibitor'], required: true },
+    userType: { type: String, enum: ['visitor', 'exhibitor'], required: true },
     eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
     showSlots: { type: Boolean, default: false }, 
     slots: [{
@@ -11,4 +11,4 @@ const userEventSlotSchema = new mongoose.Schema({
         meetingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Meeting' } 
     }]
 }, { timestamps: true });
-module.exports = mongoose.model('UserEventSlot', userEventSlotSchema);
+module.exports = mongoose.models.UserEventSlot || mongoose.model('UserEventSlot', userEventSlotSchema);

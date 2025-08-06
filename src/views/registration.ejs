@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register for <%= event.title %></title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-shadow {
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        .form-input {
+            transition: all 0.3s ease;
+        }
+        .form-input:focus {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <div class="gradient-bg text-white py-6">
+        <div class="container mx-auto px-4">
+            <div class="text-center">
+                <h1 class="text-3xl md:text-4xl font-bold mb-2">Event Registration</h1>
+                <p class="text-lg opacity-90">Join us for an amazing experience</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container mx-auto px-4 py-8">
+        <div class="max-w-6xl mx-auto">
+            <!-- Event Details Card -->
+            <div class="bg-white rounded-2xl card-shadow p-8 mb-8">
+                <div class="grid md:grid-cols-2 gap-8">
+                    <!-- Event Info -->
+                    <div>
+                        <h2 class="text-3xl font-bold text-gray-800 mb-4"><%= event.title %></h2>
+                        <p class="text-gray-600 mb-6 leading-relaxed"><%= event.description %></p>
+                        
+                        <div class="space-y-4">
+                            <div class="flex items-center text-gray-700">
+                                <i class="fas fa-calendar-alt text-blue-500 w-6"></i>
+                                <span class="ml-3">
+                                    <strong>Date:</strong> 
+                                    <%= new Date(event.fromDate).toLocaleDateString('en-US', { 
+                                        weekday: 'long', 
+                                        year: 'numeric', 
+                                        month: 'long', 
+                                        day: 'numeric' 
+                                    }) %>
+                                    <% if (new Date(event.fromDate).toDateString() !== new Date(event.toDate).toDateString()) { %>
+                                        - <%= new Date(event.toDate).toLocaleDateString('en-US', { 
+                                            weekday: 'long', 
+                                            year: 'numeric', 
+                                            month: 'long', 
+                                            day: 'numeric' 
+                                        }) %>
+                                    <% } %>
+                                </span>
+                            </div>
+                            
+                            <div class="flex items-center text-gray-700">
+                                <i class="fas fa-clock text-green-500 w-6"></i>
+                                <span class="ml-3">
+                                    <strong>Time:</strong> <%= event.startTime %> - <%= event.endTime %>
+                                </span>
+                            </div>
+                            
+                            <div class="flex items-center text-gray-700">
+                                <i class="fas fa-map-marker-alt text-red-500 w-6"></i>
+                                <span class="ml-3">
+                                    <strong>Location:</strong> <%= event.location %>
+                                </span>
+                            </div>
+                            
+                            <div class="flex items-center text-gray-700">
+                                <i class="fas fa-building text-purple-500 w-6"></i>
+                                <span class="ml-3">
+                                    <strong>Organized by:</strong> <%= event.organizerId ? (event.organizerId.organizationName || event.organizerId.name) : 'Unknown Organizer' %>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Registration Type Selection -->
+                    <div>
+                        <h3 class="text-2xl font-bold text-gray-800 mb-6">Choose Registration Type</h3>
+                        
+                        <div class="space-y-4">
+                            <div class="border-2 border-gray-200 rounded-xl p-6 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all duration-300" onclick="selectRegistrationType('exhibitor')">
+                                <div class="flex items-center">
+                                    <input type="radio" name="registrationType" value="exhibitor" class="w-5 h-5 text-blue-600">
+                                    <div class="ml-4">
+                                        <h4 class="text-xl font-semibold text-gray-800">Exhibitor</h4>
+                                        <p class="text-gray-600">Showcase your products and services</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="border-2 border-gray-200 rounded-xl p-6 cursor-pointer hover:border-green-500 hover:bg-green-50 transition-all duration-300" onclick="selectRegistrationType('visitor')">
+                                <div class="flex items-center">
+                                    <input type="radio" name="registrationType" value="visitor" class="w-5 h-5 text-green-600">
+                                    <div class="ml-4">
+                                        <h4 class="text-xl font-semibold text-gray-800">Visitor</h4>
+                                        <p class="text-gray-600">Explore and discover new opportunities</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Registration Forms -->
+            <div id="registrationForms" class="hidden">
+                <!-- Exhibitor Form -->
+                <div id="exhibitorForm" class="bg-white rounded-2xl card-shadow p-8 mb-8 hidden">
+                    <h3 class="text-2xl font-bold text-gray-800 mb-6">Exhibitor Registration</h3>
+                    <form id="exhibitorRegistrationForm">
+                        <div class="grid md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Company Name *</label>
+                                <input type="text" name="companyName" required class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                                <input type="email" name="email" required class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                                <input type="tel" name="phone" required class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Website</label>
+                                <input type="url" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Sector</label>
+                                <input type="text" name="Sector" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Location</label>
+                                <input type="text" name="location" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                        </div>
+                        
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Company Bio</label>
+                            <textarea name="bio" rows="4" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"></textarea>
+                        </div>
+                        
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Keywords (comma separated)</label>
+                            <input type="text" name="keyWords" placeholder="technology, innovation, software" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+                        
+                        <div class="mt-8">
+                            <button type="submit" class="btn-primary w-full py-4 px-6 text-white font-semibold rounded-lg">
+                                <i class="fas fa-user-plus mr-2"></i>
+                                Register as Exhibitor
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Visitor Form -->
+                <div id="visitorForm" class="bg-white rounded-2xl card-shadow p-8 mb-8 hidden">
+                    <h3 class="text-2xl font-bold text-gray-800 mb-6">Visitor Registration</h3>
+                    <form id="visitorRegistrationForm">
+                        <div class="grid md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                                <input type="text" name="name" required class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                                <input type="email" name="email" required class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                                <input type="tel" name="phone" required class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Company Name</label>
+                                <input type="text" name="companyName" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Website</label>
+                                <input type="url" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Sector</label>
+                                <input type="text" name="Sector" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Location</label>
+                                <input type="text" name="location" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                        </div>
+                        
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Bio</label>
+                            <textarea name="bio" rows="4" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"></textarea>
+                        </div>
+                        
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Interests/Keywords (comma separated)</label>
+                            <input type="text" name="keyWords" placeholder="technology, networking, business" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                        </div>
+                        
+                        <div class="mt-8">
+                            <button type="submit" class="btn-primary w-full py-4 px-6 text-white font-semibold rounded-lg" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                                <i class="fas fa-user-plus mr-2"></i>
+                                Register as Visitor
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success Modal -->
+    <div id="successModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-8 max-w-md mx-4 text-center">
+            <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-check text-green-500 text-2xl"></i>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">Registration Successful!</h3>
+            <p class="text-gray-600 mb-6">You have been successfully registered for the event. Check your email for confirmation and QR code.</p>
+            <button onclick="closeSuccessModal()" class="btn-primary px-6 py-3 text-white font-semibold rounded-lg">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-8 text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p class="text-gray-600">Processing your registration...</p>
+        </div>
+    </div>
+
+    <script>
+        let selectedType = null;
+        const registrationLink = '<%= event.registrationLink %>';
+
+        function selectRegistrationType(type) {
+            selectedType = type;
+            
+            // Update radio buttons
+            document.querySelectorAll('input[name="registrationType"]').forEach(radio => {
+                radio.checked = radio.value === type;
+            });
+            
+            // Show forms container
+            document.getElementById('registrationForms').classList.remove('hidden');
+            
+            // Hide all forms
+            document.getElementById('exhibitorForm').classList.add('hidden');
+            document.getElementById('visitorForm').classList.add('hidden');
+            
+            // Show selected form
+            document.getElementById(type + 'Form').classList.remove('hidden');
+            
+            // Scroll to form
+            document.getElementById('registrationForms').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Handle exhibitor form submission
+        document.getElementById('exhibitorRegistrationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await submitRegistration('exhibitor', new FormData(e.target));
+        });
+
+        // Handle visitor form submission
+        document.getElementById('visitorRegistrationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await submitRegistration('visitor', new FormData(e.target));
+        });
+
+        async function submitRegistration(type, formData) {
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            loadingOverlay.classList.remove('hidden');
+            loadingOverlay.classList.add('flex');
+
+            try {
+                const data = {};
+                for (let [key, value] of formData.entries()) {
+                    if (key === 'keyWords' && value) {
+                        data[key] = value.split(',').map(k => k.trim()).filter(k => k);
+                    } else {
+                        data[key] = value;
+                    }
+                }
+
+                const response = await fetch(`/api/v1/registration/event/${registrationLink}/${type}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showSuccessModal();
+                } else {
+                    throw new Error(result.message || 'Registration failed');
+                }
+            } catch (error) {
+                alert('Registration failed: ' + error.message);
+            } finally {
+                loadingOverlay.classList.add('hidden');
+                loadingOverlay.classList.remove('flex');
+            }
+        }
+
+        function showSuccessModal() {
+            const modal = document.getElementById('successModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeSuccessModal() {
+            const modal = document.getElementById('successModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // Add click handlers for registration type cards
+        document.querySelectorAll('input[name="registrationType"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                selectRegistrationType(e.target.value);
+            });
+        });
+    </script>
+</body>
+</html>

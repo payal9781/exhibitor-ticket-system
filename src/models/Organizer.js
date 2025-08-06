@@ -1,8 +1,10 @@
 // src/models/Organizer.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const organizerSchema = new mongoose.Schema({
+  name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   phone: { type: String, unique: true, sparse: true },
@@ -10,7 +12,9 @@ const organizerSchema = new mongoose.Schema({
   avatar: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
-  extraDetails: { type: mongoose.Schema.Types.Mixed }
+  extraDetails: { type: mongoose.Schema.Types.Mixed },
+  resetPasswordToken: { type: String },
+  resetPasswordExpires: { type: Date }
 }, { timestamps: true });
 
 organizerSchema.pre('save', async function (next) {
@@ -38,4 +42,4 @@ organizerSchema.methods.generateAccessToken = function () {
 };
 
 
-module.exports = mongoose.model('Organizer', organizerSchema);
+module.exports = mongoose.models.Organizer || mongoose.model('Organizer', organizerSchema);
