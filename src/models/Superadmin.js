@@ -8,6 +8,9 @@ const superadminSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     phone: { type: String, unique: true, sparse: true },
+    company: { type: String }, // Added for profile update compatibility
+    designation: { type: String }, // Added for profile update compatibility
+    address: { type: String }, // Added for profile update compatibility
     avatar: { type: String, default: '' },
     isActive: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },

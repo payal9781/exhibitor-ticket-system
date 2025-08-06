@@ -74,8 +74,14 @@ const getOrganizerById = asyncHandler(async (req, res) => {
 });
 
 const updateOrganizer = asyncHandler(async (req, res) => {
-  const { id, ...updateData } = req.body;
-  const organizer = await Organizer.findByIdAndUpdate(id, updateData, { new: true });
+  const { _id, ...updateData } = req.body;
+
+  if(updateData.firstName && updateData.lastName){
+    const name = updateData.firstName && updateData.lastName ? `${updateData.firstName} ${updateData.lastName}` : updateData.firstName || updateData.lastName || '';
+    updateData.name = name;
+  }
+
+  const organizer = await Organizer.findByIdAndUpdate(_id, updateData, { new: true });
   if (!organizer) return errorResponse(res, 'Organizer not found', 404);
   successResponse(res, organizer);
 });
