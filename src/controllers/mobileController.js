@@ -423,9 +423,6 @@ const getScanStatistics = asyncHandler(async (req, res) => {
 });
 
 // Get available slots of scanned users for meeting requests
-const { format, startOfDay } = require('date-fns');
-const { utcToZonedTime } = require('date-fns-tz');
-
 const getScannedUserSlots = asyncHandler(async (req, res) => {
   const { eventId, scannedUserId, scannedUserType } = req.body;
   const currentUserId = req.user._id;
@@ -434,83 +431,64 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event ID, scanned user ID, and user type are required', 400);
   }
 
-  // Verify scan record
+  // Verify that the current user has scanned this user
   const scanRecord = await Scan.findOne({
     scanner: currentUserId,
     eventId,
     scannedUser: scannedUserId
-  }).lean();
+  });
 
   if (!scanRecord) {
     return errorResponse(res, 'You have not scanned this user', 403);
   }
 
-  // Get user slots
+  // Get the scanned user's slots
   const userSlots = await UserEventSlot.findOne({
     userId: scannedUserId,
     userType: scannedUserType,
     eventId
-  }).lean();
+  });
 
   if (!userSlots || !userSlots.showSlots) {
     return errorResponse(res, 'User slots not available or hidden', 403);
   }
 
-  // Debug: Log slots
-  console.log('User slots:', userSlots.slots.map(slot => ({
-    start: slot.start.toISOString(),
-    status: slot.status
-  })));
-
-  // Get attendance records
+  // Get attendance records for the scanned user for this event
   const attendanceRecords = await Attendance.find({
     userId: scannedUserId,
     eventId: eventId
   }).lean();
 
-  // Debug: Log attendance records
-  console.log('Attendance records:', attendanceRecords.map(record => ({
-    attendanceDate: record.attendanceDate.toISOString()
-  })));
-
-  // Create attended dates in IST
   const attendedDates = new Set();
-  attendanceRecords.forEach(record => {
-    const dateInIST = utcToZonedTime(record.attendanceDate, 'Asia/Kolkata');
-    const dateKey = format(dateInIST, 'yyyy-MM-dd');
-    attendedDates.add(dateKey);
-  });
 
-  // Debug: Log attended dates and today's date
-  const todayIST = format(new Date(), 'yyyy-MM-dd', { timeZone: 'Asia/Kolkata' });
-  console.log('Attended dates:', Array.from(attendedDates));
-  console.log('Today in IST:', todayIST);
+attendanceRecords.forEach(record => {
+  const date = record.attendanceDate;
+  // Extract local date in YYYY-MM-DD format
+  const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  attendedDates.add(dateKey);
+});
 
-  // Filter slots in IST
-  const filteredSlots = userSlots.slots.filter(slot => {
-    const slotDateInIST = utcToZonedTime(slot.start, 'Asia/Kolkata');
-    const slotDateKey = format(slotDateInIST, 'yyyy-MM-dd');
-    return attendedDates.has(slotDateKey);
-  });
+// Filter slots to only show those on attended dates (all statuses)
+const filteredSlots = userSlots.slots.filter(slot => {
+  const slotDate = slot.start;
+  // Extract local date in YYYY-MM-DD format
+  const slotDateKey = `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, '0')}-${String(slotDate.getDate()).padStart(2, '0')}`;
+  return attendedDates.has(slotDateKey);
+});
 
-  // Debug: Log filtered slots
-  console.log('Filtered slots:', filteredSlots.map(slot => ({
-    start: slot.start.toISOString(),
-    status: slot.status
-  })));
-
-  // Group slots by date
+  // Group slots by date with color indicators
   const slotsByDate = {};
   const statusColors = {
-    'available': 'green',
-    'requested': 'yellow',
-    'booked': 'red'
+    'available': 'green',    // Available for booking
+    'requested': 'yellow',   // Pending approval
+    'booked': 'red'         // Confirmed meeting
   };
+
+  // Count slots by status
   const statusCounts = { available: 0, requested: 0, booked: 0 };
 
   filteredSlots.forEach(slot => {
-    const slotDateInIST = utcToZonedTime(slot.start, 'Asia/Kolkata');
-    const dateKey = format(slotDateInIST, 'yyyy-MM-dd');
+    const dateKey = slot.start.toISOString().split('T')[0];
     if (!slotsByDate[dateKey]) {
       slotsByDate[dateKey] = [];
     }
@@ -525,6 +503,7 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
       isBooked: slot.status === 'booked'
     });
 
+    // Count status
     if (statusCounts.hasOwnProperty(slot.status)) {
       statusCounts[slot.status]++;
     }
@@ -642,8 +621,7 @@ const getPendingMeetingRequests = asyncHandler(async (req, res) => {
   const userType = req.user.type;
 
   let query = {
-    requestedId: userId,
-    requestedType: userType,
+
     status: 'pending'
   };
 
