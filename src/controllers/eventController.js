@@ -1014,7 +1014,11 @@ const scanQRForAttendance = asyncHandler(async (req, res) => {
     const eventStartDate = new Date(startDate);
     const eventEndDate = new Date(endDate);
 
-    if (currentDate < eventStartDate || currentDate > eventEndDate) {
+    // Allow 1 day buffer before event start for testing/setup purposes
+    const bufferDate = new Date(eventStartDate);
+    bufferDate.setDate(bufferDate.getDate() - 1);
+
+    if (currentDate < bufferDate || currentDate > eventEndDate) {
       return errorResponse(res, 'QR code is not valid for current date', 400);
     }
 

@@ -2,30 +2,54 @@ const { successResponse, errorResponse } = require('../utils/apiResponse');
 const asyncHandler = require('express-async-handler');
 const models = require('../models/z-index').models;
 const Event = require('../models/Event');
+const Attendance = require('../models/attendance');
 
 const markAttendance = asyncHandler(async (req, res) => {
   const { eventId, userId, role, startDate, endDate } = req.body;
+  
+  if (!eventId || !userId || !role) {
+    return errorResponse(res, 'eventId, userId, and role are required', 400);
+  }
+
   const event = await Event.findById(eventId);
   if (!event || event.fromDate.getTime() !== new Date(startDate).getTime() || event.toDate.getTime() !== new Date(endDate).getTime()) {
     return errorResponse(res, 'Event not found or date mismatch', 404);
   }
+  
   const userArray = role === 'visitor' ? event.visitor : event.exhibitor;
-  if (!userArray.includes(userId)) return errorResponse(res, 'User not registered for event', 400);
+  if (!userArray.some(u => u.userId && u.userId.toString() === userId)) {
+    return errorResponse(res, 'User not registered for event', 400);
+  }
 
-  let attendance = await models.Attendance.findOne({ eventId, user: userId, userModel: role.charAt(0).toUpperCase() + role.slice(1) });
+  // Get today's date
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  let attendance = await Attendance.findOne({ 
+    eventId, 
+    userId: userId, 
+    userModel: role.charAt(0).toUpperCase() + role.slice(1),
+    attendanceDate: today
+  });
+  
   if (!attendance) {
-    attendance = new models.Attendance({
+    attendance = new Attendance({
       eventId,
-      organizerId: req.user._id,
-      user: userId,
+      userId: userId,
       userModel: role.charAt(0).toUpperCase() + role.slice(1),
+      attendanceDate: today,
+      scannedBy: req.user._id,
+      scannedByModel: 'User',
+      currentStatus: 'checked-in',
       attendanceDetails: [{ date: new Date(), entryTime: new Date() }]
     });
   } else {
     attendance.attendanceDetails.push({ date: new Date(), entryTime: new Date() });
+    attendance.currentStatus = 'checked-in';
   }
+  
   await attendance.save();
-  successResponse(res, attendance);
+  successResponse(res, { message: 'Attendance marked successfully', data: attendance });
 });
 
 // Get all attendance records with filtering
@@ -60,7 +84,7 @@ const getAttendanceRecords = asyncHandler(async (req, res) => {
     }
 
     // Get attendance records with populated user and event data
-    const attendanceRecords = await models.Attendance.find(query)
+    const attendanceRecords = await Attendance.find(query)
       .populate({
         path: 'userId',
         select: 'name email phone companyName profileImage'
@@ -131,7 +155,7 @@ const getAttendanceRecords = asyncHandler(async (req, res) => {
     }
 
     // Calculate statistics
-    const allRecords = await models.Attendance.find({ eventId: { $in: eventIds } })
+    const allRecords = await Attendance.find({ eventId: { $in: eventIds } })
       .populate('userId')
       .populate('eventId');
 
@@ -184,7 +208,7 @@ const getAttendanceStatistics = asyncHandler(async (req, res) => {
     }
 
     // Get all attendance records
-    const attendanceRecords = await models.Attendance.find(attendanceQuery)
+    const attendanceRecords = await Attendance.find(attendanceQuery)
       .populate('userId')
       .populate('eventId');
 
@@ -228,6 +252,16 @@ const getAttendanceStatistics = asyncHandler(async (req, res) => {
 const checkInUser = asyncHandler(async (req, res) => {
   const { userId, eventId, userType } = req.body;
   
+  // Validate required fields
+  if (!userId || !eventId || !userType) {
+    return errorResponse(res, 'userId, eventId, and userType are required', 400);
+  }
+
+  // Validate userType
+  if (!['visitor', 'exhibitor'].includes(userType.toLowerCase())) {
+    return errorResponse(res, 'userType must be either "visitor" or "exhibitor"', 400);
+  }
+
   try {
     // Verify user is registered for the event
     const event = await Event.findById(eventId);
@@ -235,26 +269,32 @@ const checkInUser = asyncHandler(async (req, res) => {
       return errorResponse(res, 'Event not found', 404);
     }
 
-    const userArray = userType === 'visitor' ? event.visitor : event.exhibitor;
+    const userArray = userType.toLowerCase() === 'visitor' ? event.visitor : event.exhibitor;
     if (!userArray.some(u => u.userId && u.userId.toString() === userId)) {
       return errorResponse(res, 'User not registered for this event', 400);
     }
 
-    // Find or create attendance record
-    let attendance = await models.Attendance.findOne({
+    // Get today's date for attendance
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Find existing attendance record for today
+    let attendance = await Attendance.findOne({
       userId,
       eventId,
-      userModel: userType.charAt(0).toUpperCase() + userType.slice(1)
+      userModel: userType.charAt(0).toUpperCase() + userType.slice(1),
+      attendanceDate: today
     });
 
     if (!attendance) {
-      attendance = new models.Attendance({
+      // Create new attendance record
+      attendance = new Attendance({
         userId,
         eventId,
         userModel: userType.charAt(0).toUpperCase() + userType.slice(1),
-        attendanceDate: new Date(),
+        attendanceDate: today,
         scannedBy: req.user._id,
-        scannedByModel: 'User',
+        scannedByModel: req.user.type === 'organizer' ? 'User' : 'User',
         currentStatus: 'checked-in',
         attendanceDetails: [{
           date: new Date(),
@@ -262,15 +302,13 @@ const checkInUser = asyncHandler(async (req, res) => {
         }]
       });
     } else {
-      // Check if already checked in today
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
+      // Check if already checked in (no exit time for latest entry)
       const latestEntry = attendance.attendanceDetails[attendance.attendanceDetails.length - 1];
       if (latestEntry && !latestEntry.exitTime) {
         return errorResponse(res, 'User is already checked in', 400);
       }
 
+      // Add new check-in entry
       attendance.attendanceDetails.push({
         date: new Date(),
         entryTime: new Date()
@@ -279,11 +317,25 @@ const checkInUser = asyncHandler(async (req, res) => {
     }
 
     await attendance.save();
-    successResponse(res, { message: 'User checked in successfully', attendance });
+    
+    successResponse(res, { 
+      message: 'User checked in successfully', 
+      data: {
+        attendanceId: attendance._id,
+        userId: attendance.userId,
+        eventId: attendance.eventId,
+        userType: attendance.userModel,
+        checkInTime: attendance.attendanceDetails[attendance.attendanceDetails.length - 1].entryTime,
+        status: attendance.currentStatus
+      }
+    });
 
   } catch (error) {
     console.error('Error checking in user:', error);
-    errorResponse(res, 'Failed to check in user', 500);
+    if (error.code === 11000) {
+      return errorResponse(res, 'Attendance record already exists for this user today', 400);
+    }
+    errorResponse(res, 'Failed to check in user: ' + error.message, 500);
   }
 });
 
@@ -291,12 +343,27 @@ const checkInUser = asyncHandler(async (req, res) => {
 const checkOutUser = asyncHandler(async (req, res) => {
   const { userId, eventId, userType } = req.body;
   
+  // Validate required fields
+  if (!userId || !eventId || !userType) {
+    return errorResponse(res, 'userId, eventId, and userType are required', 400);
+  }
+
+  // Validate userType
+  if (!['visitor', 'exhibitor'].includes(userType.toLowerCase())) {
+    return errorResponse(res, 'userType must be either "visitor" or "exhibitor"', 400);
+  }
+
   try {
-    // Find attendance record
-    const attendance = await models.Attendance.findOne({
+    // Get today's date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Find attendance record for today
+    const attendance = await Attendance.findOne({
       userId,
       eventId,
-      userModel: userType.charAt(0).toUpperCase() + userType.slice(1)
+      userModel: userType.charAt(0).toUpperCase() + userType.slice(1),
+      attendanceDate: today
     });
 
     if (!attendance || !attendance.attendanceDetails || attendance.attendanceDetails.length === 0) {
@@ -313,11 +380,22 @@ const checkOutUser = asyncHandler(async (req, res) => {
     attendance.currentStatus = 'checked-out';
     await attendance.save();
 
-    successResponse(res, { message: 'User checked out successfully', attendance });
+    successResponse(res, { 
+      message: 'User checked out successfully', 
+      data: {
+        attendanceId: attendance._id,
+        userId: attendance.userId,
+        eventId: attendance.eventId,
+        userType: attendance.userModel,
+        checkInTime: latestEntry.entryTime,
+        checkOutTime: latestEntry.exitTime,
+        status: attendance.currentStatus
+      }
+    });
 
   } catch (error) {
     console.error('Error checking out user:', error);
-    errorResponse(res, 'Failed to check out user', 500);
+    errorResponse(res, 'Failed to check out user: ' + error.message, 500);
   }
 });
 
