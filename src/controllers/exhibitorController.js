@@ -22,8 +22,8 @@ const createExhibitor = asyncHandler(async (req, res) => {
 
 const getExhibitors = asyncHandler(async (req, res) => {
   const { search, status, page = 1, limit = 10, organizerId } = req.body;
-  const userRole = req.user.role;
-  const currentUserId = req.user.id;
+  const userRole = req.user.type;
+  const currentUserId = req.user._id;
   
   let exhibitors;
   let total;
