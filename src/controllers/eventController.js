@@ -450,8 +450,8 @@ const getEventParticipants = asyncHandler(async (req, res) => {
   }
 
   const event = await Event.findById(eventId)
-    .populate('exhibitor.userId', 'companyName email phone profileImage bio Sector location')
-    .populate('visitor.userId', 'name email phone profileImage bio Sector location companyName');
+    .populate('exhibitor.userId', 'companyName email phone profileImage bio Sector location isActive isDeleted')
+    .populate('visitor.userId', 'name email phone profileImage bio Sector location companyName isActive isDeleted');
 
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
