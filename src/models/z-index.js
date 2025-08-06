@@ -2,7 +2,7 @@ const Meeting = require('./Meeting');
 
 const models = {
   Event: require('./Event'),
-  Attendance: require('./attendance'),
+  Attendance: require('./Attendance'),
   Exhibitor: require('./Exhibitor'),
   Organizer: require('./Organizer'),
   Scan: require('./Scan'),

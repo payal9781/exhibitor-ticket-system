@@ -2,7 +2,7 @@ const { successResponse, errorResponse } = require('../utils/apiResponse');
 const asyncHandler = require('express-async-handler');
 const models = require('../models/z-index').models;
 const Event = require('../models/Event');
-const Attendance = require('../models/attendance');
+const Attendance = require('../models/Attendance');
 
 const markAttendance = asyncHandler(async (req, res) => {
   const { eventId, userId, role, startDate, endDate } = req.body;
