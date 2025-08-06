@@ -327,4 +327,156 @@ const resetPassword = asyncHandler(async (req, res) => {
   successResponse(res, { message: 'Password has been reset successfully' });
 });
 
-module.exports = { register, sendOtp, verifyOtp, login, loginApp, logout, forgotPassword, verifyResetToken, resetPassword };
+// Get current user profile
+const getProfile = asyncHandler(async (req, res) => {
+  try {
+    const userRole = req.user.role || req.user.type;
+    const Model = getModelByRole(userRole);
+    
+    if (!Model) {
+      return errorResponse(res, 'Invalid user role', 400);
+    }
+
+    const user = await Model.findById(req.user._id).select('-password');
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    const userResponse = user.toObject();
+    userResponse.role = userRole;
+
+    successResponse(res, { user: userResponse, message: 'Profile retrieved successfully' });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    errorResponse(res, 'Failed to retrieve profile', 500);
+  }
+});
+
+// Update current user profile
+const updateProfile = asyncHandler(async (req, res) => {
+  try {
+    console.log('🔥 Update Profile - Request user:', req.user);
+    console.log('🔥 Update Profile - Request body:', req.body);
+    
+    const userRole = req.user.role || req.user.type;
+    console.log('🔥 Update Profile - Determined role:', userRole);
+    
+    const Model = getModelByRole(userRole);
+    console.log('🔥 Update Profile - Model found:', !!Model);
+    
+    if (!Model) {
+      console.error('🔥 Update Profile - Invalid user role:', userRole);
+      return errorResponse(res, `Invalid user role: ${userRole}`, 400);
+    }
+
+    const { password, ...updateData } = req.body; // Exclude password from profile update
+    console.log('🔥 Update Profile - Update data:', updateData);
+    
+    // Check if user exists first
+    const existingUser = await Model.findById(req.user._id);
+    if (!existingUser) {
+      console.error('🔥 Update Profile - User not found:', req.user._id);
+      return errorResponse(res, 'User not found', 404);
+    }
+    
+    console.log('🔥 Update Profile - Existing user found:', existingUser.email);
+    
+    const user = await Model.findByIdAndUpdate(
+      req.user._id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!user) {
+      console.error('🔥 Update Profile - Failed to update user');
+      return errorResponse(res, 'Failed to update user', 500);
+    }
+
+    console.log('🔥 Update Profile - User updated successfully');
+    const userResponse = user.toObject();
+    userResponse.role = userRole;
+
+    successResponse(res, { user: userResponse, message: 'Profile updated successfully' });
+  } catch (error) {
+    console.error('🔥 Update profile error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      user: req.user,
+      body: req.body
+    });
+    
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return errorResponse(res, `Validation error: ${validationErrors.join(', ')}`, 400);
+    }
+    
+    if (error.name === 'CastError') {
+      return errorResponse(res, 'Invalid user ID format', 400);
+    }
+    
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return errorResponse(res, `${field} already exists`, 400);
+    }
+    
+    errorResponse(res, `Failed to update profile: ${error.message}`, 500);
+  }
+});
+
+// Change password
+const changePassword = asyncHandler(async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    if (!currentPassword || !newPassword) {
+      return errorResponse(res, 'Current password and new password are required', 400);
+    }
+
+    if (newPassword.length < 8) {
+      return errorResponse(res, 'New password must be at least 8 characters long', 400);
+    }
+
+    const userRole = req.user.role || req.user.type;
+    const Model = getModelByRole(userRole);
+    
+    if (!Model) {
+      return errorResponse(res, 'Invalid user role', 400);
+    }
+
+    const user = await Model.findById(req.user._id);
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await user.isPasswordCorrect(currentPassword);
+    if (!isCurrentPasswordValid) {
+      return errorResponse(res, 'Current password is incorrect', 400);
+    }
+
+    // Update password
+    user.password = newPassword;
+    await user.save();
+
+    successResponse(res, { message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    errorResponse(res, 'Failed to change password', 500);
+  }
+});
+
+module.exports = { 
+  register, 
+  sendOtp, 
+  verifyOtp, 
+  login, 
+  loginApp, 
+  logout, 
+  forgotPassword, 
+  verifyResetToken, 
+  resetPassword,
+  getProfile,
+  updateProfile,
+  changePassword
+};
