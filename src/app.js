@@ -1,4 +1,3 @@
-
 // src/app.js
 const express = require('express');
 const cors = require('cors');
@@ -7,20 +6,19 @@ const app = express();
 const errorMiddleware = require('./middleware/errorMiddleware');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDoc = require('./swagger');
+
 // CORS configuration
-app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors({}));
+
 // Set up EJS as template engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
 // Serve static files
 app.use('/static', express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
 // Registration page routes (before API routes)
 app.get('/register/:registrationLink', async (req, res) => {
   try {
@@ -57,8 +55,15 @@ app.get('/register/:registrationLink', async (req, res) => {
     });
   }
 });
+
 app.use('/api/v1', require('./routes/index'));
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 app.use(errorMiddleware);
+
+// Start the server
+const PORT = process.env.PORT || 9900;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 
 module.exports = app;
