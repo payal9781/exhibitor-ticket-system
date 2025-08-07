@@ -8,7 +8,7 @@ const otpService = async (mobile, otp) => {
     const apiKey = process.env.FACTOR_KEY;
     const templateName = process.env.FACTOR_TEMPLATE_NAME;
     // const url = `https://2factor.in/API/V1/${apiKey}/SMS/${mobile}/${otp}/${templateName}`;
-    const url = `https://2factor.in/API/V1/:${apiKey}/SMS/:${mobile}/:${otp}/:${templateName}`;
+    const url = `https://2factor.in/API/V1/${apiKey}/SMS/${mobile}/${otp}/${templateName}`;
     try {
         const response = await axios.get(url);
         if (response.data.Status === 'Success') {

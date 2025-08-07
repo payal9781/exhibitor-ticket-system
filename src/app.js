@@ -1,4 +1,3 @@
-// src/app.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -14,12 +13,19 @@ app.use(cors({}));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// Serve static files
-app.use('/static', express.static(path.join(__dirname, 'public')));
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve React's index.html at the root URL
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Parse JSON and URL-encoded bodies
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Registration page routes (before API routes)
+// Registration page routes
 app.get('/register/:registrationLink', async (req, res) => {
   try {
     const { registrationLink } = req.params;
@@ -56,8 +62,11 @@ app.get('/register/:registrationLink', async (req, res) => {
   }
 });
 
+// API routes
 app.use('/api/v1', require('./routes/index'));
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc));
+
+// Error middleware
 app.use(errorMiddleware);
 
 // Start the server
