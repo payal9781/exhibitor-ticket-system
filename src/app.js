@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -5,10 +6,11 @@ const app = express();
 const errorMiddleware = require('./middleware/errorMiddleware');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDoc = require('./swagger');
-
+const connectDB = require('./config/database');
 // CORS configuration
 app.use(cors({}));
 
+connectDB();
 // Set up EJS as template engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
