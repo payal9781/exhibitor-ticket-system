@@ -9,6 +9,7 @@ const models = {
   Superadmin: require('./Superadmin'),
   Visitor: require('./Visitor'),
   Meeting: require('./Meeting'),
+  ScannedCards: require('./ScannedCards'),
 };
 
 module.exports = { models };
