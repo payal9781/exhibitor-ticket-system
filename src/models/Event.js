@@ -1,6 +1,5 @@
 // src/models/Event.js
 const mongoose = require('mongoose');
-
 const eventSchema = new mongoose.Schema({
   organizerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -19,17 +18,24 @@ const eventSchema = new mongoose.Schema({
   isDeleted: { type: Boolean, default: false },
   isActive: { type: Boolean, default: true },
   extraDetails: { type: mongoose.Schema.Types.Mixed },
-  exhibitor: [{ 
+  exhibitor: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Exhibitor" },
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now }
   }],
-  visitor: [{ 
+  visitor: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Visitor" },
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now }
   }],
-
+  schedules: [{
+    date: { type: Date, default: null }, // null for common schedules applying to all days
+    activities: [{
+      startTime: { type: String, required: true }, // Format: "HH:MM"
+      endTime: { type: String, required: true }, // Format: "HH:MM"
+      title: { type: String, required: true },
+      description: { type: String }
+    }]
+  }]
 }, { timestamps: true });
-
 module.exports = mongoose.models.Event || mongoose.model('Event', eventSchema);

@@ -8,26 +8,181 @@ const Attendance = require('../models/z-index').models.Attendance;
 const generateSlots = require('../utils/slotGenerator');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
+const moment = require('moment');
 
 const createEvent = asyncHandler(async (req, res) => {
-  const event = new Event({ ...req.body, organizerId: req.user._id });
+  const { schedules, ...eventData } = req.body;
+
+  if (schedules) {
+    for (const schedule of schedules) {
+      if (!schedule.activities || !Array.isArray(schedule.activities)) {
+        return errorResponse(res, 'Each schedule must have an activities array', 400);
+      }
+      for (const activity of schedule.activities) {
+        if (!activity.title || !activity.startTime || !activity.endTime) {
+          return errorResponse(res, 'Activity title, startTime, and endTime are required', 400);
+        }
+        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(activity.startTime) || !timeRegex.test(activity.endTime)) {
+          return errorResponse(res, 'Invalid time format for activities. Use HH:MM', 400);
+        }
+      }
+      if (schedule.date) {
+        const scheduleDate = new Date(schedule.date);
+        if (isNaN(scheduleDate.getTime()) || 
+            scheduleDate < new Date(eventData.fromDate) || 
+            scheduleDate > new Date(eventData.toDate)) {
+          return errorResponse(res, 'Schedule date must be within event date range', 400);
+        }
+      }
+    }
+  }
+
+  const event = new Event({ 
+    ...eventData, 
+    organizerId: req.user._id,
+    schedules 
+  });
   await event.save();
   successResponse(res, event, 201);
+});
+
+const addOrUpdateSchedule = asyncHandler(async (req, res) => {
+  const { eventId, isCommon, date, activities } = req.body;
+
+  if (!eventId || !activities || !Array.isArray(activities) || activities.length === 0) {
+    return errorResponse(res, 'Event ID and activities array are required', 400);
+  }
+
+  for (const activity of activities) {
+    if (!activity.title || !activity.startTime || !activity.endTime) {
+      return errorResponse(res, 'Each activity must have title, startTime, and endTime', 400);
+    }
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(activity.startTime) || !timeRegex.test(activity.endTime)) {
+      return errorResponse(res, 'Invalid time format for activities. Use HH:MM', 400);
+    }
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  const scheduleDate = isCommon ? null : new Date(date);
+  if (!isCommon && !date) {
+    return errorResponse(res, 'Date is required for date-specific schedules', 400);
+  }
+  if (!isCommon && (isNaN(scheduleDate.getTime()) || 
+      scheduleDate < new Date(event.fromDate) || 
+      scheduleDate > new Date(event.toDate))) {
+    return errorResponse(res, 'Schedule date must be within event date range', 400);
+  }
+
+  const existingScheduleIndex = event.schedules.findIndex(
+    (s) => (s.date === null && isCommon) || 
+           (s.date && scheduleDate && s.date.toDateString() === scheduleDate.toDateString())
+  );
+
+  if (existingScheduleIndex !== -1) {
+    event.schedules[existingScheduleIndex].activities = activities;
+  } else {
+    event.schedules.push({
+      date: scheduleDate,
+      activities
+    });
+  }
+
+  await event.save();
+  successResponse(res, {
+    message: 'Schedule added/updated successfully',
+    schedules: event.schedules
+  });
+});
+
+const getSchedules = asyncHandler(async (req, res) => {
+  const { eventId, mergeForDate } = req.body;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  if (mergeForDate) {
+    const targetDate = new Date(mergeForDate);
+    if (isNaN(targetDate.getTime())) {
+      return errorResponse(res, 'Invalid date format', 400);
+    }
+    const commonSchedule = event.schedules.find(s => s.date === null);
+    const specificSchedule = event.schedules.find(s => s.date && s.date.toDateString() === targetDate.toDateString());
+
+    const mergedActivities = [
+      ...(commonSchedule ? commonSchedule.activities : []),
+      ...(specificSchedule ? specificSchedule.activities : [])
+    ];
+
+    mergedActivities.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    successResponse(res, {
+      message: 'Merged schedules for date',
+      date: targetDate,
+      activities: mergedActivities
+    });
+  } else {
+    successResponse(res, {
+      message: 'All schedules retrieved',
+      schedules: event.schedules
+    });
+  }
+});
+
+const deleteSchedule = asyncHandler(async (req, res) => {
+  const { eventId, date } = req.body;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  const scheduleDate = date === 'common' || date === null ? null : new Date(date);
+  if (date && date !== 'common' && isNaN(scheduleDate.getTime())) {
+    return errorResponse(res, 'Invalid date format', 400);
+  }
+
+  event.schedules = event.schedules.filter(
+    (s) => !((s.date === null && scheduleDate === null) || 
+             (s.date && scheduleDate && s.date.toDateString() === scheduleDate.toDateString()))
+  );
+
+  await event.save();
+  successResponse(res, {
+    message: 'Schedule deleted successfully',
+    remainingSchedules: event.schedules
+  });
 });
 
 const getEvents = asyncHandler(async (req, res) => {
   const { organizerId, includeInactive = false, search, page = 1, limit = 10 } = req.body;
   let query = { isDeleted: false };
-  
-  // Only include active events unless specifically requested
+
   if (!includeInactive) {
     query.isActive = true;
   }
-  
+
   if (req.user.type === 'organizer') query.organizerId = req.user._id;
   if (req.user.type === 'superadmin' && organizerId) query.organizerId = organizerId;
-  
-  // Add search functionality
+
   if (search && search.trim()) {
     query.$or = [
       { title: { $regex: search, $options: 'i' } },
@@ -35,23 +190,21 @@ const getEvents = asyncHandler(async (req, res) => {
       { location: { $regex: search, $options: 'i' } }
     ];
   }
-  
-  // Calculate pagination
+
   const skip = (page - 1) * limit;
   const total = await Event.countDocuments(query);
-  
+
   const events = await Event.find(query)
     .populate('organizerId', 'name email organizationName')
     .sort({ fromDate: -1 })
     .skip(skip)
     .limit(parseInt(limit));
-    
-  // Add status indicators
-  const currentDate = new Date();
+
   const eventsWithStatus = events.map(event => {
     const eventObj = event.toObject();
     const eventEndDate = new Date(event.toDate);
-    
+    const currentDate = new Date();
+
     if (eventEndDate < currentDate) {
       eventObj.status = 'ended';
       eventObj.statusColor = 'red';
@@ -62,10 +215,10 @@ const getEvents = asyncHandler(async (req, res) => {
       eventObj.status = 'upcoming';
       eventObj.statusColor = 'green';
     }
-    
+
     return eventObj;
   });
-  
+
   const response = {
     events: eventsWithStatus,
     pagination: {
@@ -75,7 +228,7 @@ const getEvents = asyncHandler(async (req, res) => {
       itemsPerPage: parseInt(limit)
     }
   };
-  
+
   successResponse(res, response);
 });
 
@@ -83,15 +236,46 @@ const getEventById = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const event = await Event.findById(id).populate('organizerId', 'name email organizationName');
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId._id.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
+  if (req.user.type === 'organizer' && event.organizerId._id.toString() !== req.user._id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
   successResponse(res, event);
 });
 
 const updateEvent = asyncHandler(async (req, res) => {
-  const { id, ...updateData } = req.body;
+  const { id, schedules, ...updateData } = req.body;
   const event = await Event.findById(id);
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  if (schedules) {
+    for (const schedule of schedules) {
+      if (!schedule.activities || !Array.isArray(schedule.activities)) {
+        return errorResponse(res, 'Each schedule must have an activities array', 400);
+      }
+      for (const activity of schedule.activities) {
+        if (!activity.title || !activity.startTime || !activity.endTime) {
+          return errorResponse(res, 'Activity title, startTime, and endTime are required', 400);
+        }
+        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(activity.startTime) || !timeRegex.test(activity.endTime)) {
+          return errorResponse(res, 'Invalid time format for activities. Use HH:MM', 400);
+        }
+      }
+      if (schedule.date) {
+        const scheduleDate = new Date(schedule.date);
+        if (isNaN(scheduleDate.getTime()) || 
+            scheduleDate < new Date(event.fromDate) || 
+            scheduleDate > new Date(event.toDate)) {
+          return errorResponse(res, 'Schedule date must be within event date range', 400);
+        }
+      }
+    }
+    event.schedules = schedules;
+  }
+
   Object.assign(event, updateData);
   await event.save();
   successResponse(res, event);
@@ -101,24 +285,24 @@ const deleteEvent = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const event = await Event.findById(id);
 
-  if(event.exhibitor.length > 0 || event.visitor.length > 0){
+  if (event.exhibitor.length > 0 || event.visitor.length > 0) {
     return successResponse(res, { message: 'Event has exhibitors or visitors, so it cannot be deleted', status: 400 });
   }
 
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) return errorResponse(res, 'Access denied', 403);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
   event.isDeleted = true;
   await event.save();
   successResponse(res, { message: 'Event deleted' });
 });
 
-// Register user for event (exhibitor/visitor) and generate slots
 const registerForEvent = asyncHandler(async (req, res) => {
-  const { eventId, userId, userType } = req.body; // For admin/organizer to add, or self-register
+  const { eventId, userId, userType } = req.body;
   const event = await Event.findById(eventId);
   if (!event) return errorResponse(res, 'Event not found', 404);
 
-  // Generate QR code data
   const qrData = { 
     eventId, 
     userId, 
@@ -127,7 +311,8 @@ const registerForEvent = asyncHandler(async (req, res) => {
     endDate: event.toDate,
     eventTitle: event.title 
   };
-  const qrCode = await require('../utils/qrGenerator')(qrData);
+  const qrResult = await generateParticipantQR(eventId, userId, userType, event.title);
+  const qrCode = qrResult.qrCode;
 
   let isNewRegistration = false;
 
@@ -149,13 +334,16 @@ const registerForEvent = asyncHandler(async (req, res) => {
 
   await event.save();
 
-  // Generate slots only for new registrations
   if (isNewRegistration) {
-    // Check if user already has slots for this event
     const existingSlots = await UserEventSlot.findOne({ userId, userType, eventId });
     if (!existingSlots) {
       const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-      const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
+      const slots = rawSlots.map(s => ({ 
+        start: s.start, 
+        end: s.end, 
+        status: 'available',
+        showSlots: false 
+      }));
       const userSlot = new UserEventSlot({ userId, userType, eventId, slots });
       await userSlot.save();
     }
@@ -168,13 +356,139 @@ const registerForEvent = asyncHandler(async (req, res) => {
   });
 });
 
-// Get event statistics
+const registerByLink = asyncHandler(async (req, res) => {
+  const { registrationLink, type } = req.params;
+  const participantData = req.body;
+
+  if (!['exhibitor', 'visitor'].includes(type)) {
+    return errorResponse(res, 'Invalid registration type. Must be "exhibitor" or "visitor"', 400);
+  }
+
+  if (!registrationLink) {
+    return errorResponse(res, 'Registration link is required', 400);
+  }
+
+  const event = await Event.findOne({ registrationLink });
+  if (!event) {
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  if (!event.isActive) {
+    return errorResponse(res, 'Cannot register for inactive event', 400);
+  }
+
+  const requiredFields = type === 'exhibitor' 
+    ? ['companyName', 'email', 'phone'] 
+    : ['name', 'email', 'phone'];
+  for (const field of requiredFields) {
+    if (!participantData[field]) {
+      return errorResponse(res, `${field} is required`, 400);
+    }
+  }
+
+  const Model = type === 'exhibitor' ? Exhibitor : Visitor;
+  let participant;
+  let isNewParticipant = false;
+
+  let existingParticipant = null;
+  if (participantData.email) {
+    existingParticipant = await Model.findOne({ email: participantData.email, isDeleted: false });
+  }
+  if (!existingParticipant && participantData.phone) {
+    existingParticipant = await Model.findOne({ phone: participantData.phone, isDeleted: false });
+  }
+
+  if (existingParticipant) {
+    Object.keys(participantData).forEach((key) => {
+      if (participantData[key] && participantData[key] !== '') {
+        existingParticipant[key] = participantData[key];
+      }
+    });
+    participant = await existingParticipant.save();
+  } else {
+    participant = new Model({
+      ...participantData,
+      isActive: true,
+    });
+    await participant.save();
+    isNewParticipant = true;
+  }
+
+  const qrData = {
+    eventId: event._id,
+    userId: participant._id,
+    userType: type,
+    startDate: event.fromDate,
+    endDate: event.toDate,
+    eventTitle: event.title,
+  };
+  const qrResult = await generateParticipantQR(event._id, participant._id, type, event.title);
+  const qrCode = qrResult.qrCode;
+
+  let isNewRegistration = false;
+  const participantArray = type === 'exhibitor' ? event.exhibitor : event.visitor;
+  const existingParticipantInEvent = participantArray.find(p => p.userId.toString() === participant._id.toString());
+
+  if (!existingParticipantInEvent) {
+    participantArray.push({ userId: participant._id, qrCode });
+    isNewRegistration = true;
+  } else {
+    return errorResponse(res, `${type} already registered for this event`, 400);
+  }
+
+  await event.save();
+
+  if (isNewRegistration) {
+    const existingSlots = await UserEventSlot.findOne({
+      userId: participant._id,
+      userType: type,
+      eventId: event._id,
+    });
+
+    if (!existingSlots) {
+      const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+      const slots = rawSlots.map(s => ({
+        start: s.start,
+        end: s.end,
+        status: 'available',
+        showSlots: false,
+      }));
+      const userSlot = new UserEventSlot({
+        userId: participant._id,
+        userType: type,
+        eventId: event._id,
+        slots,
+      });
+      await userSlot.save();
+    }
+  }
+
+  successResponse(res, {
+    message: `${type} registered successfully`,
+    qrCode,
+    isNewRegistration,
+    isNewParticipant,
+    participant: {
+      _id: participant._id,
+      name: type === 'exhibitor' ? participant.companyName : participant.name,
+      email: participant.email,
+      phone: participant.phone,
+    },
+    event: {
+      _id: event._id,
+      title: event.title,
+      fromDate: event.fromDate,
+      toDate: event.toDate,
+    },
+  });
+});
+
 const getEventStats = asyncHandler(async (req, res) => {
   let query = { isDeleted: false };
   if (req.user.type === 'organizer') {
     query.organizerId = req.user._id;
   }
-  
+
   const totalEvents = await Event.countDocuments(query);
   const activeEvents = await Event.countDocuments({ 
     ...query, 
@@ -189,116 +503,103 @@ const getEventStats = asyncHandler(async (req, res) => {
     ...query, 
     toDate: { $lt: new Date() } 
   });
-  
+
   const stats = {
     totalEvents,
     activeEvents,
     upcomingEvents,
     pastEvents
   };
-  
+
   successResponse(res, stats);
 });
 
-// Get upcoming events for organizer (for dropdown in add participant)
 const getUpcomingEvents = asyncHandler(async (req, res) => {
   const currentDate = new Date();
   let query = { 
     isDeleted: false,
     isActive: true,
-    fromDate: { $gte: currentDate } // Only upcoming active events
+    fromDate: { $gte: currentDate }
   };
-  
+
   if (req.user.type === 'organizer') {
     query.organizerId = req.user._id;
   }
-  
+
   const upcomingEvents = await Event.find(query)
     .select('_id title fromDate toDate location isActive')
     .sort({ fromDate: 1 });
-  
+
   successResponse(res, upcomingEvents);
 });
 
-// Get all participants (exhibitors and visitors) for organizer dropdown
 const getAllParticipants = asyncHandler(async (req, res) => {
-  const { search, type } = req.body; // search term and type filter
-  
+  const { search, type } = req.body;
+
   let exhibitors = [];
   let visitors = [];
-  
-  // Build search query
+
   let searchQuery = { isDeleted: false, isActive: true };
   if (search) {
     const searchRegex = new RegExp(search, 'i');
     searchQuery.$or = [
       { email: searchRegex },
-      { phone: searchRegex }
+      { phone: searchRegex },
     ];
   }
-  
-  // Get exhibitors if type is not specified or is 'exhibitor'
+
   if (!type || type === 'exhibitor') {
     const exhibitorSearchQuery = { ...searchQuery };
     if (search) {
       exhibitorSearchQuery.$or.push({ companyName: new RegExp(search, 'i') });
     }
-    
-    exhibitors = await require('../models/Exhibitor').find(exhibitorSearchQuery)
+
+    exhibitors = await Exhibitor.find(exhibitorSearchQuery)
       .select('_id companyName email phone profileImage bio Sector location')
       .limit(50)
       .sort({ companyName: 1 });
   }
-  
-  // Get visitors if type is not specified or is 'visitor'  
+
   if (!type || type === 'visitor') {
     const visitorSearchQuery = { ...searchQuery };
     if (search) {
       visitorSearchQuery.$or.push({ name: new RegExp(search, 'i') });
       visitorSearchQuery.$or.push({ companyName: new RegExp(search, 'i') });
     }
-    
-    visitors = await require('../models/Visitor').find(visitorSearchQuery)
+
+    visitors = await Visitor.find(visitorSearchQuery)
       .select('_id name email phone profileImage bio Sector location companyName')
       .limit(50)
       .sort({ name: 1 });
   }
-  
-  // Format response
-  const formattedExhibitors = exhibitors.map(ex => ({
+
+  const formattedExhibitors = exhibitors.map((ex) => ({
     ...ex.toObject(),
     userType: 'exhibitor',
-    displayName: ex.companyName
+    displayName: ex.companyName,
   }));
-  
-  const formattedVisitors = visitors.map(vis => ({
+
+  const formattedVisitors = visitors.map((vis) => ({
     ...vis.toObject(),
     userType: 'visitor',
-    displayName: vis.name
+    displayName: vis.name,
   }));
-  
+
   successResponse(res, {
     exhibitors: formattedExhibitors,
     visitors: formattedVisitors,
     totalExhibitors: formattedExhibitors.length,
     totalVisitors: formattedVisitors.length,
-    totalParticipants: formattedExhibitors.length + formattedVisitors.length
+    totalParticipants: formattedExhibitors.length + formattedVisitors.length,
   });
 });
 
-// Add exhibitor/visitor to event by organizer with participant creation if needed
 const addParticipantToEvent = asyncHandler(async (req, res) => {
-  const { 
-    eventId, 
-    participantId, 
-    participantType, 
-    participantData // New participant data if creating new participant
-  } = req.body;
-  
+  const { eventId, participantId, participantType, participantData } = req.body;
+
   if (!eventId || !participantType) {
     return errorResponse(res, 'Event ID and participant type are required', 400);
   }
-
   if (!['exhibitor', 'visitor'].includes(participantType)) {
     return errorResponse(res, 'Invalid participant type. Must be "exhibitor" or "visitor"', 400);
   }
@@ -306,7 +607,6 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
   const event = await Event.findById(eventId);
   if (!event) return errorResponse(res, 'Event not found', 404);
 
-  // Check if organizer owns this event
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
     return errorResponse(res, 'Access denied', 403);
   }
@@ -314,50 +614,39 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
   let participant;
   let isNewParticipant = false;
 
-  // If participantId is provided, find existing participant
   if (participantId) {
-    if (participantType === 'exhibitor') {
-      participant = await require('../models/Exhibitor').findById(participantId);
-    } else {
-      participant = await require('../models/Visitor').findById(participantId);
-    }
-
+    const Model = participantType === 'exhibitor' ? Exhibitor : Visitor;
+    participant = await Model.findById(participantId);
     if (!participant) {
       return errorResponse(res, `${participantType} not found`, 404);
     }
-  } 
-  // If participantData is provided, create new participant or find existing by email/phone
-  else if (participantData) {
-    const Model = participantType === 'exhibitor' ? 
-      require('../models/Exhibitor') : 
-      require('../models/Visitor');
-
-    // Check if participant already exists by phone or email
-    let existingParticipant = null;
-    if (participantData.phone) {
-      existingParticipant = await Model.findOne({ 
-        phone: participantData.phone, 
-        isDeleted: false 
-      });
+  } else if (participantData) {
+    const Model = participantType === 'exhibitor' ? Exhibitor : Visitor;
+    const requiredFields = participantType === 'exhibitor' 
+      ? ['companyName', 'email', 'phone'] 
+      : ['name', 'email', 'phone'];
+    for (const field of requiredFields) {
+      if (!participantData[field]) {
+        return errorResponse(res, `${field} is required`, 400);
+      }
     }
-    
-    if (!existingParticipant && participantData.email) {
-      existingParticipant = await Model.findOne({ 
-        email: participantData.email, 
-        isDeleted: false 
-      });
+
+    let existingParticipant = null;
+    if (participantData.email) {
+      existingParticipant = await Model.findOne({ email: participantData.email, isDeleted: false });
+    }
+    if (!existingParticipant && participantData.phone) {
+      existingParticipant = await Model.findOne({ phone: participantData.phone, isDeleted: false });
     }
 
     if (existingParticipant) {
-      // Update existing participant with new data
-      Object.keys(participantData).forEach(key => {
+      Object.keys(participantData).forEach((key) => {
         if (participantData[key] && participantData[key] !== '') {
           existingParticipant[key] = participantData[key];
         }
       });
       participant = await existingParticipant.save();
     } else {
-      // Create new participant
       participant = new Model({
         ...participantData,
         isActive: true
@@ -369,16 +658,16 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Either participantId or participantData is required', 400);
   }
 
-  // Generate QR code data
-  const qrData = { 
-    eventId, 
-    userId: participant._id, 
-    userType: participantType, 
-    startDate: event.fromDate, 
+  const qrData = {
+    eventId,
+    userId: participant._id,
+    userType: participantType,
+    startDate: event.fromDate,
     endDate: event.toDate,
-    eventTitle: event.title 
+    eventTitle: event.title
   };
-  const qrCode = await require('../utils/qrGenerator')(qrData);
+  const qrResult = await generateParticipantQR(eventId, participant._id, participantType, event.title);
+  const qrCode = qrResult.qrCode;
 
   let isNewRegistration = false;
 
@@ -398,31 +687,35 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
 
   await event.save();
 
-  // Generate slots only for new registrations
   if (isNewRegistration) {
-    const existingSlots = await UserEventSlot.findOne({ 
-      userId: participant._id, 
-      userType: participantType, 
-      eventId 
+    const existingSlots = await UserEventSlot.findOne({
+      userId: participant._id,
+      userType: participantType,
+      eventId
     });
-    
+
     if (!existingSlots) {
       const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-      const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
-      const userSlot = new UserEventSlot({ 
-        userId: participant._id, 
-        userType: participantType, 
-        eventId, 
-        slots 
+      const slots = rawSlots.map(s => ({ 
+        start: s.start, 
+        end: s.end, 
+        status: 'available',
+        showSlots: false 
+      }));
+      const userSlot = new UserEventSlot({
+        userId: participant._id,
+        userType: participantType,
+        eventId,
+        slots
       });
       await userSlot.save();
     }
   }
 
-  successResponse(res, { 
-    message: isNewRegistration ? 
-      `${participantType} added to event successfully` : 
-      `${participantType} already registered for this event`, 
+  successResponse(res, {
+    message: isNewRegistration ?
+      `${participantType} added to event successfully` :
+      `${participantType} already registered for this event`,
     qrCode,
     isNewRegistration,
     isNewParticipant,
@@ -441,10 +734,9 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
   });
 });
 
-// Get event participants (exhibitors and visitors)
 const getEventParticipants = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  
+
   if (!eventId) {
     return errorResponse(res, 'Event ID is required', 400);
   }
@@ -457,7 +749,6 @@ const getEventParticipants = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  // Check access permissions
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
     return errorResponse(res, 'Access denied', 403);
   }
@@ -487,42 +778,38 @@ const getEventParticipants = asyncHandler(async (req, res) => {
   });
 });
 
-// Update event status based on current date
 const updateEventStatus = asyncHandler(async (req, res) => {
   const currentDate = new Date();
-  
-  // Find events that have ended but are still marked as active
+
   const endedEvents = await Event.find({
     isDeleted: false,
     isActive: true,
     toDate: { $lt: currentDate }
   });
-  
-  // Update ended events to inactive
+
   const updatePromises = endedEvents.map(event => {
     event.isActive = false;
     return event.save();
   });
-  
+
   await Promise.all(updatePromises);
-  
+
   successResponse(res, {
     message: `Updated ${endedEvents.length} events to inactive status`,
     updatedEvents: endedEvents.length
   });
 });
 
-// Get event statistics with status breakdown
 const getEventStatusStats = asyncHandler(async (req, res) => {
   const currentDate = new Date();
   let query = { isDeleted: false };
-  
+
   if (req.user.type === 'organizer') {
     query.organizerId = req.user._id;
   }
-  
+
   const allEvents = await Event.find(query);
-  
+
   const stats = {
     total: allEvents.length,
     active: 0,
@@ -531,17 +818,17 @@ const getEventStatusStats = asyncHandler(async (req, res) => {
     ongoing: 0,
     ended: 0
   };
-  
+
   allEvents.forEach(event => {
     const eventStartDate = new Date(event.fromDate);
     const eventEndDate = new Date(event.toDate);
-    
+
     if (event.isActive) {
       stats.active++;
     } else {
       stats.inactive++;
     }
-    
+
     if (eventEndDate < currentDate) {
       stats.ended++;
     } else if (eventStartDate <= currentDate && eventEndDate >= currentDate) {
@@ -550,45 +837,36 @@ const getEventStatusStats = asyncHandler(async (req, res) => {
       stats.upcoming++;
     }
   });
-  
+
   successResponse(res, stats);
 });
 
-// ===== COMPREHENSIVE PARTICIPANT MANAGEMENT =====
-
-// Get all available exhibitors and visitors for selection
 const getAvailableParticipants = asyncHandler(async (req, res) => {
   const { eventId, search = '', userType = 'all' } = req.body;
-  
+
   if (!eventId) {
     return errorResponse(res, 'Event ID is required', 400);
   }
 
-  // Verify event exists and user has access
   const event = await Event.findById(eventId);
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  // Check access permissions
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
-  // Get already registered participant IDs
   const registeredExhibitorIds = event.exhibitor.map(ex => ex.userId.toString());
   const registeredVisitorIds = event.visitor.map(vis => vis.userId.toString());
-
   let availableParticipants = [];
 
-  // Search exhibitors
   if (userType === 'all' || userType === 'exhibitor') {
     const searchQuery = {
       isDeleted: false,
       isActive: true,
       _id: { $nin: registeredExhibitorIds }
     };
-
     if (search) {
       searchQuery.$or = [
         { companyName: { $regex: search, $options: 'i' } },
@@ -597,11 +875,9 @@ const getAvailableParticipants = asyncHandler(async (req, res) => {
         { Sector: { $regex: search, $options: 'i' } }
       ];
     }
-
     const exhibitors = await Exhibitor.find(searchQuery)
       .select('companyName email phone bio Sector location website')
       .limit(50);
-
     const exhibitorData = exhibitors.map(ex => ({
       _id: ex._id,
       name: ex.companyName,
@@ -615,18 +891,15 @@ const getAvailableParticipants = asyncHandler(async (req, res) => {
       displayName: `${ex.companyName} (${ex.email})`,
       isRegistered: false
     }));
-
     availableParticipants = [...availableParticipants, ...exhibitorData];
   }
 
-  // Search visitors
   if (userType === 'all' || userType === 'visitor') {
     const searchQuery = {
       isDeleted: false,
       isActive: true,
       _id: { $nin: registeredVisitorIds }
     };
-
     if (search) {
       searchQuery.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -636,11 +909,9 @@ const getAvailableParticipants = asyncHandler(async (req, res) => {
         { Sector: { $regex: search, $options: 'i' } }
       ];
     }
-
     const visitors = await Visitor.find(searchQuery)
       .select('name email phone bio Sector location companyName')
       .limit(50);
-
     const visitorData = visitors.map(vis => ({
       _id: vis._id,
       name: vis.name,
@@ -654,13 +925,10 @@ const getAvailableParticipants = asyncHandler(async (req, res) => {
       displayName: `${vis.name} (${vis.email})`,
       isRegistered: false
     }));
-
     availableParticipants = [...availableParticipants, ...visitorData];
   }
 
-  // Sort by name
   availableParticipants.sort((a, b) => a.name.localeCompare(b.name));
-
   successResponse(res, {
     eventId,
     eventTitle: event.title,
@@ -671,7 +939,6 @@ const getAvailableParticipants = asyncHandler(async (req, res) => {
   });
 });
 
-// Generate QR code for participant
 const generateParticipantQR = async (eventId, userId, userType, eventTitle) => {
   const qrData = {
     eventId,
@@ -681,7 +948,6 @@ const generateParticipantQR = async (eventId, userId, userType, eventTitle) => {
     timestamp: new Date().toISOString(),
     qrId: crypto.randomBytes(16).toString('hex')
   };
-
   try {
     const qrCodeString = await QRCode.toDataURL(JSON.stringify(qrData));
     return {
@@ -699,60 +965,51 @@ const generateParticipantQR = async (eventId, userId, userType, eventTitle) => {
   }
 };
 
-// Add single participant to event
 const addParticipantToEventComprehensive = asyncHandler(async (req, res) => {
   const { eventId, userId, userType } = req.body;
-  
+
   if (!eventId || !userId || !userType) {
     return errorResponse(res, 'Event ID, User ID, and User Type are required', 400);
   }
-
   if (!['exhibitor', 'visitor'].includes(userType)) {
     return errorResponse(res, 'User type must be either exhibitor or visitor', 400);
   }
 
-  // Verify event exists and user has access
   const event = await Event.findById(eventId);
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  // Check access permissions
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
-  // Check if event is still active for registration
   if (!event.isActive) {
     return errorResponse(res, 'Cannot add participants to inactive events', 400);
   }
 
-  // Verify user exists
   const UserModel = userType === 'exhibitor' ? Exhibitor : Visitor;
   const user = await UserModel.findById(userId);
   if (!user) {
     return errorResponse(res, `${userType} not found`, 404);
   }
-
   if (!user.isActive || user.isDeleted) {
     return errorResponse(res, `${userType} is not active`, 400);
   }
 
-  // Check if already registered
   const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
   const isAlreadyRegistered = participantArray.some(p => p.userId.toString() === userId);
-  
+
   if (isAlreadyRegistered) {
     return errorResponse(res, `${userType} is already registered for this event`, 400);
   }
 
-  // Generate QR code
   const qrResult = await generateParticipantQR(eventId, userId, userType, event.title);
+  const qrCode = qrResult.qrCode;
 
-  // Add to event
   const participantData = {
     userId,
-    qrCode: qrResult.qrCode,
+    qrCode,
     registeredAt: new Date()
   };
 
@@ -764,30 +1021,35 @@ const addParticipantToEventComprehensive = asyncHandler(async (req, res) => {
 
   await event.save();
 
-  // Generate 30-minute slots for the participant
   try {
-    const slots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-    
-    const userSlots = slots.map(slot => ({
-      eventId,
+    const existingSlots = await UserEventSlot.findOne({
       userId,
       userType,
-      start: slot.start,
-      end: slot.end,
-      status: 'available',
-      showSlots: false // Default to hidden
-    }));
+      eventId,
+    });
 
-    await UserEventSlot.insertMany(userSlots);
+    if (!existingSlots) {
+      const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+      const slots = rawSlots.map(s => ({
+        start: s.start,
+        end: s.end,
+        status: 'available',
+        showSlots: false
+      }));
+      const userSlot = new UserEventSlot({
+        userId,
+        userType,
+        eventId,
+        slots
+      });
+      await userSlot.save();
+    }
   } catch (slotError) {
     console.error('Error generating slots:', slotError);
-    // Don't fail the registration if slot generation fails
   }
 
-  // Get updated participant info
   const updatedEvent = await Event.findById(eventId)
     .populate(`${userType}.userId`, userType === 'exhibitor' ? 'companyName email phone' : 'name email phone');
-
   const addedParticipant = updatedEvent[userType].find(p => p.userId._id.toString() === userId);
 
   successResponse(res, {
@@ -806,29 +1068,24 @@ const addParticipantToEventComprehensive = asyncHandler(async (req, res) => {
   });
 });
 
-// Add multiple participants to event
 const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
-  const { eventId, participants } = req.body; // participants: [{ userId, userType }]
-  
+  const { eventId, participants } = req.body;
+
   if (!eventId || !participants || !Array.isArray(participants)) {
     return errorResponse(res, 'Event ID and participants array are required', 400);
   }
-
   if (participants.length === 0) {
     return errorResponse(res, 'At least one participant is required', 400);
   }
 
-  // Verify event exists and user has access
   const event = await Event.findById(eventId);
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  // Check access permissions
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
     return errorResponse(res, 'Access denied', 403);
   }
-
   if (!event.isActive) {
     return errorResponse(res, 'Cannot add participants to inactive events', 400);
   }
@@ -839,11 +1096,10 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
     totalProcessed: participants.length
   };
 
-  // Process each participant
   for (const participant of participants) {
     try {
       const { userId, userType } = participant;
-      
+
       if (!userId || !userType || !['exhibitor', 'visitor'].includes(userType)) {
         results.failed.push({
           userId,
@@ -853,10 +1109,9 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
         continue;
       }
 
-      // Check if already registered
       const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
       const isAlreadyRegistered = participantArray.some(p => p.userId.toString() === userId);
-      
+
       if (isAlreadyRegistered) {
         results.failed.push({
           userId,
@@ -866,10 +1121,9 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
         continue;
       }
 
-      // Verify user exists
       const UserModel = userType === 'exhibitor' ? Exhibitor : Visitor;
       const user = await UserModel.findById(userId);
-      
+
       if (!user || !user.isActive || user.isDeleted) {
         results.failed.push({
           userId,
@@ -879,13 +1133,12 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
         continue;
       }
 
-      // Generate QR code
       const qrResult = await generateParticipantQR(eventId, userId, userType, event.title);
+      const qrCode = qrResult.qrCode;
 
-      // Add to event
       const participantData = {
         userId,
-        qrCode: qrResult.qrCode,
+        qrCode,
         registeredAt: new Date()
       };
 
@@ -895,21 +1148,29 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
         event.visitor.push(participantData);
       }
 
-      // Generate slots
       try {
-        const slots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-        
-        const userSlots = slots.map(slot => ({
-          eventId,
+        const existingSlots = await UserEventSlot.findOne({
           userId,
           userType,
-          start: slot.start,
-          end: slot.end,
-          status: 'available',
-          showSlots: false
-        }));
+          eventId,
+        });
 
-        await UserEventSlot.insertMany(userSlots);
+        if (!existingSlots) {
+          const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+          const slots = rawSlots.map(s => ({
+            start: s.start,
+            end: s.end,
+            status: 'available',
+            showSlots: false
+          }));
+          const userSlot = new UserEventSlot({
+            userId,
+            userType,
+            eventId,
+            slots
+          });
+          await userSlot.save();
+        }
       } catch (slotError) {
         console.error('Error generating slots for user:', userId, slotError);
       }
@@ -920,7 +1181,6 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
         name: userType === 'exhibitor' ? user.companyName : user.name,
         email: user.email
       });
-
     } catch (error) {
       results.failed.push({
         userId: participant.userId,
@@ -930,9 +1190,7 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
     }
   }
 
-  // Save event with all new participants
   await event.save();
-
   successResponse(res, {
     message: `Processed ${results.totalProcessed} participants`,
     results,
@@ -942,26 +1200,22 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
   });
 });
 
-// Remove participant from event
 const removeParticipantFromEvent = asyncHandler(async (req, res) => {
   const { eventId, userId, userType } = req.body;
-  
+
   if (!eventId || !userId || !userType) {
     return errorResponse(res, 'Event ID, User ID, and User Type are required', 400);
   }
 
-  // Verify event exists and user has access
   const event = await Event.findById(eventId);
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  // Check access permissions
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
-  // Remove from event
   if (userType === 'exhibitor') {
     event.exhibitor = event.exhibitor.filter(ex => ex.userId.toString() !== userId);
   } else {
@@ -970,7 +1224,6 @@ const removeParticipantFromEvent = asyncHandler(async (req, res) => {
 
   await event.save();
 
-  // Remove user slots
   await UserEventSlot.deleteMany({
     eventId,
     userId,
@@ -983,18 +1236,16 @@ const removeParticipantFromEvent = asyncHandler(async (req, res) => {
   });
 });
 
-// QR Code scanning for attendance
 const scanQRForAttendance = asyncHandler(async (req, res) => {
   const { qrData } = req.body;
   const scannerId = req.user._id;
-  const scannerType = req.user.type; // 'organizer' or 'superadmin'
+  const scannerType = req.user.type;
 
   if (!qrData) {
     return errorResponse(res, 'QR data is required', 400);
   }
 
   try {
-    // Parse QR data (assuming it's JSON string)
     let parsedQRData;
     try {
       parsedQRData = typeof qrData === 'string' ? JSON.parse(qrData) : qrData;
@@ -1003,23 +1254,18 @@ const scanQRForAttendance = asyncHandler(async (req, res) => {
     }
 
     const { eventId, userId, userType, startDate, endDate } = parsedQRData;
-
     if (!eventId || !userId || !userType || !startDate || !endDate) {
       return errorResponse(res, 'Invalid QR code data', 400);
     }
 
-    // Verify event exists and is active
     const event = await Event.findById(eventId);
     if (!event || !event.isActive || event.isDeleted) {
       return errorResponse(res, 'Event not found or inactive', 404);
     }
 
-    // Check if current date is within event period
     const currentDate = new Date();
     const eventStartDate = new Date(startDate);
     const eventEndDate = new Date(endDate);
-
-    // Allow 1 day buffer before event start for testing/setup purposes
     const bufferDate = new Date(eventStartDate);
     bufferDate.setDate(bufferDate.getDate() - 1);
 
@@ -1027,27 +1273,23 @@ const scanQRForAttendance = asyncHandler(async (req, res) => {
       return errorResponse(res, 'QR code is not valid for current date', 400);
     }
 
-    // Verify user exists and is registered for this event
     const UserModel = userType === 'exhibitor' ? Exhibitor : Visitor;
     const user = await UserModel.findById(userId);
-    
+
     if (!user || !user.isActive || user.isDeleted) {
       return errorResponse(res, 'User not found or inactive', 404);
     }
 
-    // Check if user is registered for this event
     const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
     const isRegistered = participantArray.some(p => p.userId.toString() === userId);
-    
+
     if (!isRegistered) {
       return errorResponse(res, 'User is not registered for this event', 403);
     }
 
-    // Get today's date (without time)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Check if attendance already exists for today
     const existingAttendance = await Attendance.findOne({
       userId,
       eventId,
@@ -1065,19 +1307,17 @@ const scanQRForAttendance = asyncHandler(async (req, res) => {
       });
     }
 
-    // Create new attendance record
     const attendance = new Attendance({
       userId,
       userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
       eventId,
       attendanceDate: today,
       scannedBy: scannerId,
-      scannedByModel: 'User', // organizer/superadmin
+      scannedByModel: 'User',
       qrData: parsedQRData
     });
 
     await attendance.save();
-
     successResponse(res, {
       message: 'Attendance recorded successfully',
       attendance,
@@ -1090,45 +1330,40 @@ const scanQRForAttendance = asyncHandler(async (req, res) => {
         location: event.location
       }
     });
-
   } catch (error) {
     console.error('QR scan error:', error);
     return errorResponse(res, 'Failed to process QR scan', 500);
   }
 });
 
-// Get attendance statistics for today
 const getAttendanceStats = asyncHandler(async (req, res) => {
   const organizerId = req.user._id;
-  
-  // Get today's date range
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
-    // Get organizer's events
-    const organizerEvents = await Event.find({ 
-      organizerId, 
-      isActive: true, 
-      isDeleted: false 
+    const organizerEvents = await Event.find({
+      organizerId,
+      isActive: true,
+      isDeleted: false
     }).select('_id title');
 
     const eventIds = organizerEvents.map(event => event._id);
 
-    // Get today's attendance records for organizer's events
     const todayAttendance = await Attendance.find({
       eventId: { $in: eventIds },
       attendanceDate: {
         $gte: today,
         $lt: tomorrow
       }
-    }).populate('userId', 'name companyName')
+    })
+      .populate('userId', 'name companyName')
       .populate('eventId', 'title location')
       .sort({ scanTime: -1 });
 
-    // Calculate statistics
     const stats = {
       totalScansToday: todayAttendance.length,
       uniqueParticipantsToday: new Set(todayAttendance.map(a => a.userId._id.toString())).size,
@@ -1157,13 +1392,17 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
   }
 });
 
-module.exports = { 
-  createEvent, 
-  getEvents, 
-  getEventById, 
-  updateEvent, 
-  deleteEvent, 
-  registerForEvent, 
+module.exports = {
+  createEvent,
+  addOrUpdateSchedule,
+  getSchedules,
+  deleteSchedule,
+  getEvents,
+  getEventById,
+  updateEvent,
+  deleteEvent,
+  registerForEvent,
+  registerByLink,
   getEventStats,
   getUpcomingEvents,
   getAllParticipants,
@@ -1171,12 +1410,10 @@ module.exports = {
   getEventParticipants,
   updateEventStatus,
   getEventStatusStats,
-  // New comprehensive participant management
   getAvailableParticipants,
   addParticipantToEventComprehensive,
   addMultipleParticipantsToEvent,
   removeParticipantFromEvent,
-  // QR scanning for attendance
   scanQRForAttendance,
   getAttendanceStats
 };

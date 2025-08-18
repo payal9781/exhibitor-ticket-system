@@ -1,4 +1,3 @@
-// src/models/Organizer.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -11,11 +10,35 @@ const organizerSchema = new mongoose.Schema({
   organizationName: { type: String },
   company: { type: String }, // Added for profile update compatibility
   designation: { type: String }, // Added for profile update compatibility
-  address: { type: String }, // Added for profile update compatibility
+  address: { 
+    street: { type: String },
+    city: { type: String },
+    state: { type: String },
+    country: { type: String },
+    zipCode: { type: String }
+  },
   avatar: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
-  extraDetails: { type: mongoose.Schema.Types.Mixed },
+  extraDetails: { 
+    website: { type: String },
+    description: { type: String },
+    socialMedia: {
+      linkedin: { type: String },
+      twitter: { type: String },
+      facebook: { type: String },
+      instagram: { type: String }
+    },
+    businessInfo: {
+      taxId: { type: String },
+      businessType: { type: String, enum: ['corporation', 'llc', 'partnership', 'sole_proprietorship', 'nonprofit'] },
+      foundedYear: { type: Number },
+      employeeCount: { type: String },
+      industry: { type: String }
+    },
+    notes: { type: String },
+    tags: [{ type: String }]
+  },
   resetPasswordToken: { type: String },
   resetPasswordExpires: { type: Date }
 }, { timestamps: true });
@@ -30,6 +53,7 @@ organizerSchema.pre('save', async function (next) {
 organizerSchema.methods.isPasswordCorrect = async function (password) {
   return await bcrypt.compare(password, this.password);
 };
+
 organizerSchema.methods.generateAccessToken = function () {
   return jwt.sign(
     {
@@ -43,6 +67,5 @@ organizerSchema.methods.generateAccessToken = function () {
     }
   );
 };
-
 
 module.exports = mongoose.models.Organizer || mongoose.model('Organizer', organizerSchema);
