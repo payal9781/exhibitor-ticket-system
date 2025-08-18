@@ -15,6 +15,7 @@ const exhibitorSchema = new mongoose.Schema({
   socialMediaLinks: { type: Object },
   isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
+  digitalProfile: { type: String, default: '' },
   machineId: { type: String ,default: ''},
   otp: { type: String },
   otpExpires: { type: Date }

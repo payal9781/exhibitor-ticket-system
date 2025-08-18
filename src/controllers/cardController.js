@@ -40,7 +40,7 @@ exports.createDigitalCard = asyncHandler(async (req, res) => {
         }
     });
 
-    if (result.data) {
+    if (result.data != null) {
         let isVisitor = await models.Visitor.findById(req.user.id);
         if (isVisitor) {
             await models.Visitor.findByIdAndUpdate(req.user.id, { digitalProfile: result.data.path }, { new: true });

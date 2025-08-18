@@ -15,6 +15,7 @@ const visitorSchema = new mongoose.Schema({
   location: { type: String },
   socialMediaLinks: { type: Object },
   machineId: { type: String, default: '' },
+  digitalProfile: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
   otp: { type: String },
