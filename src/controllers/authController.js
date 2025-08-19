@@ -11,6 +11,7 @@ const otpService = require('../services/otpService');
 const generateSlots = require('../utils/slotGenerator');
 const generateQR = require('../utils/qrGenerator');
 const moment = require("moment");
+const axios = require('axios');
 const getModelByRole = (role) => {
   switch (role) {
     case 'organizer': return Organizer;
@@ -32,23 +33,43 @@ const register = asyncHandler(async (req, res) => {
   if (['exhibitor', 'visitor'].includes(role)) {
     return errorResponse(res, 'Use event registration flow for exhibitor/visitor', 400);
   }
-  
+
   // Check if user already exists
   const existingUser = await Model.findOne({ email: userData.email });
   if (existingUser) {
     return errorResponse(res, 'User with this email already exists', 409);
   }
-  
+
   try {
     const user = new Model(userData);
+    const payload = {
+      name: String(userData.name).trim(),
+      email: userData.email,
+      mobile: userData.phone,
+      businessKeyword: "Event",
+      originId: "67ca6934c15747af04fff36c",
+      countryCode: "91"
+    };
+
+    try {
+      const DIGITAL_CARD_URL = "https://digitalcard.co.in/web/create-account/mobile";
+      var result = await axios.post(DIGITAL_CARD_URL, payload, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      if (result.data != null) { user.digitalProfile = result.data.path; }
+      else { console.log(`Something went wrong while creating digital card: ${result.data}`); }
+    } catch (err) {
+      console.log(`Error in creating digital card: ${err}`);
+    }
+
     await user.save();
     const token = user.generateAccessToken();
-    
-    // Remove password from response and add role
+
     const userResponse = user.toObject();
     delete userResponse.password;
-    userResponse.role = role; // Add role to response
-    
+    userResponse.role = role;
     successResponse(res, { user: userResponse, token }, 201);
   } catch (error) {
     if (error.code === 11000) {
@@ -81,27 +102,27 @@ const sendOtp = asyncHandler(async (req, res) => {
   if (!sent) {
     return successResponse(res, { message: 'Failed to send OTP', data: 0 });
   }
-  successResponse(res, { 
+  successResponse(res, {
     message: 'OTP sent successfully',
-    data: { 
-      userId: user._id, 
-      exists 
+    data: {
+      userId: user._id,
+      exists
     }
   });
 });
 
 const verifyOtp = asyncHandler(async (req, res) => {
-  const { role, phone, otp ,machineId} = req.body;
+  const { role, phone, otp, machineId } = req.body;
   if (!['exhibitor', 'visitor'].includes(role)) {
     return successResponse(res, { message: 'Invalid role for OTP login', data: 0 });
   }
   const Model = getModelByRole(role);
-  const user = await Model.findOne({phone});
+  const user = await Model.findOne({ phone });
   if (!user) {
     return successResponse(res, { message: 'User not found', data: 0 });
   }
 
-  if(otp && otp == '1234'){
+  if (otp && otp == '1234') {
     user.otp = '1234';
     user.otpExpires = new Date(moment().add(1, 'days').toDate());
     await user.save();
@@ -110,14 +131,14 @@ const verifyOtp = asyncHandler(async (req, res) => {
   if (!user.otp || user.otp !== otp || user.otpExpires < new Date()) {
     user.otp = undefined;
     user.otpExpires = undefined;
-   
+
     await user.save();
     return successResponse(res, { message: 'Invalid or expired OTP', data: 0 });
   }
 
-  if(!machineId && machineId != ''){
+  if (!machineId && machineId != '') {
     return successResponse(res, { message: 'Invalid device id', data: 0 });
-  }else{
+  } else {
     user.machineId = machineId;
     await user.save();
   }
@@ -132,12 +153,12 @@ const verifyOtp = asyncHandler(async (req, res) => {
   const userResponse = user.toObject();
   delete userResponse.password;
   userResponse.role = role;
-  
-  successResponse(res, { 
+
+  successResponse(res, {
     message: 'OTP verified successfully',
-    data: { 
-      user: userResponse, 
-      token 
+    data: {
+      user: userResponse,
+      token
     }
   });
 });
@@ -162,26 +183,26 @@ const login = asyncHandler(async (req, res) => {
 
 const loginApp = asyncHandler(async (req, res) => {
   const { role, phone, machineId } = req.body;
-  
+
   // Validate role
   if (!['exhibitor', 'visitor'].includes(role)) {
-    return successResponse(res, { message: 'Invalid role for OTP login' ,data:0});
+    return successResponse(res, { message: 'Invalid role for OTP login', data: 0 });
   }
-  
+
   // Validate required fields
   if (!phone || !machineId) {
-    return successResponse(res, { message: 'Phone number and machine ID are required' , data:0});
+    return successResponse(res, { message: 'Phone number and machine ID are required', data: 0 });
   }
-  
+
   const Model = getModelByRole(role);
   const user = await Model.findOne({ phone });
-  
+
   if (!user) {
-    return successResponse(res, { message: 'User not found' , data:0});
+    return successResponse(res, { message: 'User not found', data: 0 });
   }
-  
+
   let isVerified = false;
-  
+
   // Check machineId verification logic
   if (!user.machineId || user.machineId === '') {
     // If machineId is empty, update it with the provided machineId
@@ -193,23 +214,23 @@ const loginApp = asyncHandler(async (req, res) => {
     // If machineId doesn't match, user is not verified
     isVerified = false;
   }
-  
+
   const token = user.generateAccessToken();
-  
+
   // Prepare user response
   const userResponse = user.toObject();
   delete userResponse.password;
   delete userResponse.otp;
   delete userResponse.otpExpires;
   userResponse.role = role;
-  
-  successResponse(res, {  
-    message:'Login successful',
-    data:{
-      user: userResponse, 
-    token, 
-    isVerified
-    } 
+
+  successResponse(res, {
+    message: 'Login successful',
+    data: {
+      user: userResponse,
+      token,
+      isVerified
+    }
   });
 });
 
@@ -220,7 +241,7 @@ const logout = asyncHandler(async (req, res) => {
 
 const forgotPassword = asyncHandler(async (req, res) => {
   const { email, role } = req.body;
-  
+
   if (!email || !role) {
     return errorResponse(res, 'Email and role are required', 400);
   }
@@ -231,7 +252,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
   const Model = getModelByRole(role);
   const user = await Model.findOne({ email });
-  
+
   if (!user) {
     // Don't reveal if user exists or not for security
     return successResponse(res, { message: 'If an account with that email exists, a password reset link has been sent.' });
@@ -249,7 +270,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
   // Send email
   const emailService = require('../services/emailService');
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
-  
+
   try {
     await emailService.sendPasswordResetEmail(email, resetUrl, user.name || 'User');
     successResponse(res, { message: 'If an account with that email exists, a password reset link has been sent.' });
@@ -258,7 +279,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();
-    
+
     console.error('Failed to send password reset email:', error);
     console.error('Email error details:', {
       host: process.env.SMTP_HOST,
@@ -273,7 +294,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
 const verifyResetToken = asyncHandler(async (req, res) => {
   // Get token from either request body or URL parameter
   const token = req.body.token || req.params.token;
-  
+
   if (!token) {
     return errorResponse(res, 'Reset token is required', 400);
   }
@@ -295,7 +316,7 @@ const verifyResetToken = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Invalid or expired reset token', 400);
   }
 
-  successResponse(res, { 
+  successResponse(res, {
     message: 'Token is valid',
     data: {
       email: user.email,
@@ -306,7 +327,7 @@ const verifyResetToken = asyncHandler(async (req, res) => {
 
 const resetPassword = asyncHandler(async (req, res) => {
   const { token, password } = req.body;
-  
+
   if (!token || !password) {
     return errorResponse(res, 'Token and password are required', 400);
   }
@@ -346,7 +367,7 @@ const getProfile = asyncHandler(async (req, res) => {
   try {
     const userRole = req.user.role || req.user.type;
     const Model = getModelByRole(userRole);
-    
+
     if (!Model) {
       return errorResponse(res, 'Invalid user role', 400);
     }
@@ -371,13 +392,13 @@ const updateProfile = asyncHandler(async (req, res) => {
   try {
     console.log('🔥 Update Profile - Request user:', req.user);
     console.log('🔥 Update Profile - Request body:', req.body);
-    
+
     const userRole = req.user.role || req.user.type;
     console.log('🔥 Update Profile - Determined role:', userRole);
-    
+
     const Model = getModelByRole(userRole);
     console.log('🔥 Update Profile - Model found:', !!Model);
-    
+
     if (!Model) {
       console.error('🔥 Update Profile - Invalid user role:', userRole);
       return errorResponse(res, `Invalid user role: ${userRole}`, 400);
@@ -385,16 +406,16 @@ const updateProfile = asyncHandler(async (req, res) => {
 
     const { password, ...updateData } = req.body; // Exclude password from profile update
     console.log('🔥 Update Profile - Update data:', updateData);
-    
+
     // Check if user exists first
     const existingUser = await Model.findById(req.user._id);
     if (!existingUser) {
       console.error('🔥 Update Profile - User not found:', req.user.id);
       return errorResponse(res, 'User not found', 404);
     }
-    
+
     console.log('🔥 Update Profile - Existing user found:', existingUser.email);
-    
+
     const user = await Model.findByIdAndUpdate(
       req.user.id,
       updateData,
@@ -419,21 +440,21 @@ const updateProfile = asyncHandler(async (req, res) => {
       user: req.user,
       body: req.body
     });
-    
+
     if (error.name === 'ValidationError') {
       const validationErrors = Object.values(error.errors).map(err => err.message);
       return errorResponse(res, `Validation error: ${validationErrors.join(', ')}`, 400);
     }
-    
+
     if (error.name === 'CastError') {
       return errorResponse(res, 'Invalid user ID format', 400);
     }
-    
+
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
       return errorResponse(res, `${field} already exists`, 400);
     }
-    
+
     errorResponse(res, `Failed to update profile: ${error.message}`, 500);
   }
 });
@@ -442,7 +463,7 @@ const updateProfile = asyncHandler(async (req, res) => {
 const changePassword = asyncHandler(async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
-    
+
     if (!currentPassword || !newPassword) {
       return errorResponse(res, 'Current password and new password are required', 400);
     }
@@ -453,7 +474,7 @@ const changePassword = asyncHandler(async (req, res) => {
 
     const userRole = req.user.role || req.user.type;
     const Model = getModelByRole(userRole);
-    
+
     if (!Model) {
       return errorResponse(res, 'Invalid user role', 400);
     }
@@ -480,15 +501,15 @@ const changePassword = asyncHandler(async (req, res) => {
   }
 });
 
-module.exports = { 
-  register, 
-  sendOtp, 
-  verifyOtp, 
-  login, 
-  loginApp, 
-  logout, 
-  forgotPassword, 
-  verifyResetToken, 
+module.exports = {
+  register,
+  sendOtp,
+  verifyOtp,
+  login,
+  loginApp,
+  logout,
+  forgotPassword,
+  verifyResetToken,
   resetPassword,
   getProfile,
   updateProfile,
