@@ -8,6 +8,7 @@ const organizerSchema = new mongoose.Schema({
   password: { type: String, required: true },
   phone: { type: String, unique: true, sparse: true },
   organizationName: { type: String },
+  digitalProfile: { type: String, default: "" },
   company: { type: String }, // Added for profile update compatibility
   designation: { type: String }, // Added for profile update compatibility
   address: { 
