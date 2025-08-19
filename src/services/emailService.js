@@ -23,7 +23,7 @@ const sendPasswordResetEmail = async (email, resetUrl, userName) => {
   const mailOptions = {
     from: process.env.SMTP_USER,
     to: email,
-    subject: 'Password Reset Request - EventAdmin',
+    subject: 'Password Reset Request - Planora',
     html: `
       <!DOCTYPE html>
       <html>
@@ -80,14 +80,14 @@ const sendPasswordResetEmail = async (email, resetUrl, userName) => {
       </head>
       <body>
         <div class="header">
-          <h1>EventAdmin</h1>
+          <h1>Planora</h1>
           <h2>Password Reset Request</h2>
         </div>
         
         <div class="content">
           <p>Hello ${userName},</p>
           
-          <p>We received a request to reset your password for your EventAdmin account. If you didn't make this request, you can safely ignore this email.</p>
+          <p>We received a request to reset your password for your Planora account. If you didn't make this request, you can safely ignore this email.</p>
           
           <p>To reset your password, click the button below:</p>
           
@@ -104,7 +104,7 @@ const sendPasswordResetEmail = async (email, resetUrl, userName) => {
           
           <p>If you're having trouble with the button above, copy and paste the URL into your web browser.</p>
           
-          <p>Best regards,<br>The EventAdmin Team</p>
+          <p>Best regards,<br>The Planora Team</p>
         </div>
         
         <div class="footer">
