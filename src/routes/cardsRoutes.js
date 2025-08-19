@@ -5,9 +5,9 @@ const { getCards, saveCard, deleteCard, createDigitalCard } = require('../contro
 
 // Dashboard stats routes
 
-router.get('/create-digital-card', authMiddleware(['exhibitor', 'visitor']), createDigitalCard);
-router.get('/save-card', authMiddleware(['exhibitor', 'visitor']), saveCard);
-router.get('/get-cards', authMiddleware(['exhibitor', 'visitor']), getCards);
-router.get('/delete-cards', authMiddleware(['exhibitor', 'visitor']), deleteCard);
+router.post('/create-digital-card', authMiddleware(['exhibitor', 'visitor']), createDigitalCard);
+router.post('/save-card', authMiddleware(['exhibitor', 'visitor']), saveCard);
+router.post('/get-cards', authMiddleware(['exhibitor', 'visitor']), getCards);
+router.post('/delete-cards', authMiddleware(['exhibitor', 'visitor']), deleteCard);
 
 module.exports = router;
