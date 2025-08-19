@@ -1,4 +1,4 @@
-const Meeting = require('./Meeting');
+const Meeting = require('./meeting');
 
 const models = {
   Event: require('./Event'),
@@ -8,7 +8,7 @@ const models = {
   Scan: require('./Scan'),
   Superadmin: require('./Superadmin'),
   Visitor: require('./Visitor'),
-  Meeting: require('./Meeting'),
+  Meeting: require('./meeting'),
   ScannedCards: require('./ScannedCards'),
 };
 

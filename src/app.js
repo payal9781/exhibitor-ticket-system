@@ -10,7 +10,7 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerDoc = require('./swagger');
 // CORS configuration
 app.use(cors({}));
-
+app.set('etag',false);
 // Set up EJS as template engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -68,6 +68,14 @@ app.get('/register/:registrationLink', async (req, res) => {
 app.use('/api/v1', require('./routes/index'));
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 
+app.get('*', (req, res) => {
+  // Avoid redirecting API routes
+  if (!req.originalUrl.startsWith('/api')) {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  } else {
+    res.status(404).json({ message: 'API route not found' });
+  }
+});
 // Error middleware
 app.use(errorMiddleware);
 

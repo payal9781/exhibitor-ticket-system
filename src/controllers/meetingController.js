@@ -1,7 +1,7 @@
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const asyncHandler = require('express-async-handler');
 const UserEventSlot = require('../models/UserEventSlot');
-const Meeting = require('../models/Meeting');
+const Meeting = require("../models/meeting");
 
 const toggleShowSlots = asyncHandler(async (req, res) => {
   const { eventId, show } = req.body;
