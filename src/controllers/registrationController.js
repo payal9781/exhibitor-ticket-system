@@ -3,30 +3,31 @@ const asyncHandler = require('express-async-handler');
 const Event = require('../models/Event');
 const Exhibitor = require('../models/Exhibitor');
 const Visitor = require('../models/Visitor');
+const axios = require('axios');
 const UserEventSlot = require('../models/UserEventSlot');
 const generateSlots = require('../utils/slotGenerator');
 
 // Get event registration details by registration link
 const getEventByRegistrationLink = asyncHandler(async (req, res) => {
   const { registrationLink } = req.params;
-  
-  const event = await Event.findOne({ 
-    registrationLink, 
-    isDeleted: false 
+
+  const event = await Event.findOne({
+    registrationLink,
+    isDeleted: false
   }).populate('organizerId', 'name email organizationName');
-  
+
   if (!event) {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
-  
+
   // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
   const eventStartDate = new Date(event.fromDate);
-  
+
   if (currentDate > eventStartDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
-  
+
   // Return event details for registration page
   successResponse(res, {
     event: {
@@ -49,43 +50,43 @@ const getEventByRegistrationLink = asyncHandler(async (req, res) => {
 const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   const { registrationLink } = req.params;
   const exhibitorData = req.body;
-  
+
   // Find event by registration link
-  const event = await Event.findOne({ 
-    registrationLink, 
-    isDeleted: false 
+  const event = await Event.findOne({
+    registrationLink,
+    isDeleted: false
   });
-  
+
   if (!event) {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
-  
+
   // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
   const eventStartDate = new Date(event.fromDate);
-  
+
   if (currentDate > eventStartDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
-  
+
   let exhibitor;
   let isNewExhibitor = false;
-  
+
   // Check if exhibitor already exists by phone or email
   if (exhibitorData.phone) {
-    exhibitor = await Exhibitor.findOne({ 
-      phone: exhibitorData.phone, 
-      isDeleted: false 
+    exhibitor = await Exhibitor.findOne({
+      phone: exhibitorData.phone,
+      isDeleted: false
     });
   }
-  
+
   if (!exhibitor && exhibitorData.email) {
-    exhibitor = await Exhibitor.findOne({ 
-      email: exhibitorData.email, 
-      isDeleted: false 
+    exhibitor = await Exhibitor.findOne({
+      email: exhibitorData.email,
+      isDeleted: false
     });
   }
-  
+
   if (exhibitor) {
     // Update existing exhibitor with new data if provided
     Object.keys(exhibitorData).forEach(key => {
@@ -100,10 +101,35 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
       ...exhibitorData,
       isActive: true
     });
+
+
+    let digitalCardLink = "";
+    try {
+      const payload = {
+        name: String(exhibitor.companyName).trim(),
+        email: exhibitor.email,
+        mobile: exhibitor.phone,
+        businessKeyword: "Event Exhibitor",
+        originId: "67ca6934c15747af04fff36c",
+        countryCode: "91"
+      };
+      console.log(payload);
+      const DIGITAL_CARD_URL = "https://digitalcard.co.in/web/create-account/mobile";
+      var result = await axios.post(DIGITAL_CARD_URL, payload, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      if (result.data != null && result.data.data!=null) { exhibitor.digitalProfile = result.data.data.path; }
+      else { console.log(`Something went wrong while creating digital card: ${result.data}`); }
+    } catch (err) {
+      console.log(`Error in creating digital card: ${err}`);
+    }
+
     await exhibitor.save();
     isNewExhibitor = true;
   }
-  
+
   // Check if exhibitor is already registered for this event
   const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
   if (existingExhibitor) {
@@ -120,40 +146,40 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
       qrCode: existingExhibitor.qrCode
     });
   }
-  
+
   // Generate QR code
-  const qrData = { 
-    eventId: event._id, 
-    userId: exhibitor._id, 
-    userType: 'exhibitor', 
-    startDate: event.fromDate, 
+  const qrData = {
+    eventId: event._id,
+    userId: exhibitor._id,
+    userType: 'exhibitor',
+    startDate: event.fromDate,
     endDate: event.toDate,
     eventTitle: event.title
   };
   const qrCode = await require('../utils/qrGenerator')(qrData);
-  
+
   // Add exhibitor to event with QR code
-  event.exhibitor.push({ 
-    userId: exhibitor._id, 
+  event.exhibitor.push({
+    userId: exhibitor._id,
     qrCode,
     registeredAt: new Date()
   });
   await event.save();
-  
+
   // Generate slots for the exhibitor
   const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
   const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
-  
-  const userSlot = new UserEventSlot({ 
-    userId: exhibitor._id, 
-    userType: 'exhibitor', 
-    eventId: event._id, 
-    slots 
+
+  const userSlot = new UserEventSlot({
+    userId: exhibitor._id,
+    userType: 'exhibitor',
+    eventId: event._id,
+    slots
   });
   await userSlot.save();
-  
 
-  
+
+
   successResponse(res, {
     message: 'Exhibitor registered successfully for the event',
     exhibitor: {
@@ -177,43 +203,43 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
 const registerVisitorForEvent = asyncHandler(async (req, res) => {
   const { registrationLink } = req.params;
   const visitorData = req.body;
-  
+
   // Find event by registration link
-  const event = await Event.findOne({ 
-    registrationLink, 
-    isDeleted: false 
+  const event = await Event.findOne({
+    registrationLink,
+    isDeleted: false
   });
-  
+
   if (!event) {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
-  
+
   // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
   const eventStartDate = new Date(event.fromDate);
-  
+
   if (currentDate > eventStartDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
-  
+
   let visitor;
   let isNewVisitor = false;
-  
+
   // Check if visitor already exists by phone or email
   if (visitorData.phone) {
-    visitor = await Visitor.findOne({ 
-      phone: visitorData.phone, 
-      isDeleted: false 
+    visitor = await Visitor.findOne({
+      phone: visitorData.phone,
+      isDeleted: false
     });
   }
-  
+
   if (!visitor && visitorData.email) {
-    visitor = await Visitor.findOne({ 
-      email: visitorData.email, 
-      isDeleted: false 
+    visitor = await Visitor.findOne({
+      email: visitorData.email,
+      isDeleted: false
     });
   }
-  
+
   if (visitor) {
     // Update existing visitor with new data if provided
     Object.keys(visitorData).forEach(key => {
@@ -228,10 +254,32 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
       ...visitorData,
       isActive: true
     });
+
+    try {
+      const payload = {
+        name: String(visitor.name).trim(),
+        email: visitor.email,
+        mobile: visitor.phone,
+        businessKeyword: "Event Visitor",
+        originId: "67ca6934c15747af04fff36c",
+        countryCode: "91"
+      };
+      const DIGITAL_CARD_URL = "https://digitalcard.co.in/web/create-account/mobile";
+      var result = await axios.post(DIGITAL_CARD_URL, payload, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      if (result.data != null && result.data.data!=null) { visitor.digitalProfile = result.data.data.path; }
+      else { console.log(`Something went wrong while creating digital card: ${result.data}`); }
+    } catch (err) {
+      console.log(`Error in creating digital card: ${err}`);
+    }
+
     await visitor.save();
     isNewVisitor = true;
   }
-  
+
   // Check if visitor is already registered for this event
   const existingVisitor = event.visitor.find(vis => vis.userId.toString() === visitor._id.toString());
   if (existingVisitor) {
@@ -248,40 +296,40 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
       qrCode: existingVisitor.qrCode
     });
   }
-  
+
   // Generate QR code
-  const qrData = { 
-    eventId: event._id, 
-    userId: visitor._id, 
-    userType: 'visitor', 
-    startDate: event.fromDate, 
+  const qrData = {
+    eventId: event._id,
+    userId: visitor._id,
+    userType: 'visitor',
+    startDate: event.fromDate,
     endDate: event.toDate,
     eventTitle: event.title
   };
   const qrCode = await require('../utils/qrGenerator')(qrData);
-  
+
   // Add visitor to event with QR code
-  event.visitor.push({ 
-    userId: visitor._id, 
+  event.visitor.push({
+    userId: visitor._id,
     qrCode,
     registeredAt: new Date()
   });
   await event.save();
-  
+
   // Generate slots for the visitor
   const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
   const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
-  
-  const userSlot = new UserEventSlot({ 
-    userId: visitor._id, 
-    userType: 'visitor', 
-    eventId: event._id, 
-    slots 
+
+  const userSlot = new UserEventSlot({
+    userId: visitor._id,
+    userType: 'visitor',
+    eventId: event._id,
+    slots
   });
   await userSlot.save();
-  
 
-  
+
+
   successResponse(res, {
     message: 'Visitor registered successfully for the event',
     visitor: {
@@ -304,15 +352,15 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
 // Get event registration statistics
 const getEventRegistrationStats = asyncHandler(async (req, res) => {
   const { eventId } = req.params;
-  
+
   const event = await Event.findById(eventId)
     .populate('exhibitor.userId', 'companyName email phone createdAt')
     .populate('visitor.userId', 'name email phone createdAt');
-  
+
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
   }
-  
+
   const stats = {
     totalExhibitors: event.exhibitor.length,
     totalVisitors: event.visitor.length,
@@ -328,7 +376,7 @@ const getEventRegistrationStats = asyncHandler(async (req, res) => {
       registeredAt: vis.registeredAt
     }))
   };
-  
+
   successResponse(res, stats);
 });
 
@@ -340,10 +388,10 @@ const getUpcomingEventsForRegistration = asyncHandler(async (req, res) => {
     isActive: true, // Only active events
     fromDate: { $gte: currentDate } // Only upcoming events
   })
-  .select('_id title fromDate toDate location registrationLink')
-  .populate('organizerId', 'name organizationName')
-  .sort({ fromDate: 1 })
-  .limit(20);
+    .select('_id title fromDate toDate location registrationLink')
+    .populate('organizerId', 'name organizationName')
+    .sort({ fromDate: 1 })
+    .limit(20);
 
   const formattedEvents = upcomingEvents.map(event => ({
     _id: event._id,
@@ -365,25 +413,25 @@ const getUpcomingEventsForRegistration = asyncHandler(async (req, res) => {
 // Register for multiple events (bulk registration)
 const registerForMultipleEvents = asyncHandler(async (req, res) => {
   const { eventIds, participantData, participantType } = req.body;
-  
+
   if (!eventIds || !Array.isArray(eventIds) || eventIds.length === 0) {
     return errorResponse(res, 'Event IDs array is required', 400);
   }
-  
+
   if (!participantData || !participantType) {
     return errorResponse(res, 'Participant data and type are required', 400);
   }
-  
+
   if (!['exhibitor', 'visitor'].includes(participantType)) {
     return errorResponse(res, 'Invalid participant type', 400);
   }
 
   // Find all events
-  const events = await Event.find({ 
-    _id: { $in: eventIds }, 
-    isDeleted: false 
+  const events = await Event.find({
+    _id: { $in: eventIds },
+    isDeleted: false
   });
-  
+
   if (events.length !== eventIds.length) {
     return errorResponse(res, 'Some events not found', 404);
   }
@@ -397,24 +445,24 @@ const registerForMultipleEvents = asyncHandler(async (req, res) => {
 
   let participant;
   let isNewParticipant = false;
-  
-  const Model = participantType === 'exhibitor' ? 
-    require('../models/Exhibitor') : 
+
+  const Model = participantType === 'exhibitor' ?
+    require('../models/Exhibitor') :
     require('../models/Visitor');
 
   // Check if participant already exists
   let existingParticipant = null;
   if (participantData.phone) {
-    existingParticipant = await Model.findOne({ 
-      phone: participantData.phone, 
-      isDeleted: false 
+    existingParticipant = await Model.findOne({
+      phone: participantData.phone,
+      isDeleted: false
     });
   }
-  
+
   if (!existingParticipant && participantData.email) {
-    existingParticipant = await Model.findOne({ 
-      email: participantData.email, 
-      isDeleted: false 
+    existingParticipant = await Model.findOne({
+      email: participantData.email,
+      isDeleted: false
     });
   }
 
@@ -437,26 +485,26 @@ const registerForMultipleEvents = asyncHandler(async (req, res) => {
   }
 
   const registrationResults = [];
-  
+
   // Register for each event
   for (const event of events) {
     // Check if already registered
     const isAlreadyRegistered = participantType === 'exhibitor' ?
       event.exhibitor.some(ex => ex.userId.toString() === participant._id.toString()) :
       event.visitor.some(vis => vis.userId.toString() === participant._id.toString());
-    
+
     if (!isAlreadyRegistered) {
       // Generate QR code
-      const qrData = { 
-        eventId: event._id, 
-        userId: participant._id, 
-        userType: participantType, 
-        startDate: event.fromDate, 
+      const qrData = {
+        eventId: event._id,
+        userId: participant._id,
+        userType: participantType,
+        startDate: event.fromDate,
         endDate: event.toDate,
         eventTitle: event.title
       };
       const qrCode = await require('../utils/qrGenerator')(qrData);
-      
+
       // Add to event
       if (participantType === 'exhibitor') {
         event.exhibitor.push({ userId: participant._id, qrCode });
@@ -464,19 +512,19 @@ const registerForMultipleEvents = asyncHandler(async (req, res) => {
         event.visitor.push({ userId: participant._id, qrCode });
       }
       await event.save();
-      
+
       // Generate slots
       const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
       const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
-      
-      const userSlot = new UserEventSlot({ 
-        userId: participant._id, 
-        userType: participantType, 
-        eventId: event._id, 
-        slots 
+
+      const userSlot = new UserEventSlot({
+        userId: participant._id,
+        userType: participantType,
+        eventId: event._id,
+        slots
       });
       await userSlot.save();
-      
+
       registrationResults.push({
         eventId: event._id,
         eventTitle: event.title,
@@ -492,7 +540,7 @@ const registerForMultipleEvents = asyncHandler(async (req, res) => {
       });
     }
   }
-  
+
   successResponse(res, {
     message: `Registration completed for ${registrationResults.filter(r => r.registered).length} events`,
     participant: {
