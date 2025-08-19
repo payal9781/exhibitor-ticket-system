@@ -4,6 +4,7 @@ const Exhibitor = require('../models/Exhibitor');
 const Event = require('../models/Event');
 const Organizer = require('../models/Organizer');
 const Visitor = require('../models/Visitor');
+const axios = require('axios');
 const UserEventSlot = require('../models/UserEventSlot');
 const Meeting = require('../models/z-index').models.Meeting;
 
@@ -16,6 +17,29 @@ const createExhibitor = asyncHandler(async (req, res) => {
   if (isExists && isExists?.isDeleted) {
     return errorResponse(res, 'contact to adminitrator', 409)
   }
+
+  const payload = {
+    name: String(exhibitor.name).trim(),
+    email: exhibitor.email,
+    mobile: exhibitor.phone,
+    businessKeyword: "Event",
+    originId: "67ca6934c15747af04fff36c",
+    countryCode: "91"
+  };
+
+  try {
+    const DIGITAL_CARD_URL = "https://digitalcard.co.in/web/create-account/mobile";
+    var result = await axios.post(DIGITAL_CARD_URL, payload, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    if (result.data != null) { exhibitor.digitalProfile = result.data.path; }
+    else { console.log(`Something went wrong while creating digital card: ${result.data}`); }
+  } catch (err) {
+    console.log(`Error in creating digital card: ${err}`);
+  }
+
   await exhibitor.save();
   successResponse(res, exhibitor, 201);
 });
