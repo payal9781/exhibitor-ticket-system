@@ -6,7 +6,7 @@ const { generateQRCode } = require('../services/qrCodeService');
 
 const registerForEvent = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
   const role = req.user.type;
 
   const event = await models.Event.findById(eventId);
@@ -35,7 +35,7 @@ const registerForEvent = asyncHandler(async (req, res) => {
 
 const scanQRCode = asyncHandler(async (req, res) => {
   const { qrData } = req.body;
-  const scannerId = req.user._id;
+  const scannerId = req.user.id;
   const scannerRole = req.user.type;
 
   let parsedData;

@@ -32,7 +32,7 @@ superadminSchema.methods.isPasswordCorrect = async function (password) {
 superadminSchema.methods.generateAccessToken = function () {
     return jwt.sign(
         {
-            _id: this._id,
+            id: this._id,
             email: this.email,
             type: 'superAdmin'
         },

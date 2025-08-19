@@ -40,7 +40,7 @@ const createEvent = asyncHandler(async (req, res) => {
 
   const event = new Event({ 
     ...eventData, 
-    organizerId: req.user._id,
+    organizerId: req.user.id,
     schedules 
   });
   await event.save();
@@ -66,7 +66,7 @@ const addOrUpdateSchedule = asyncHandler(async (req, res) => {
 
   const event = await Event.findById(eventId);
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -110,7 +110,7 @@ const getSchedules = asyncHandler(async (req, res) => {
 
   const event = await Event.findById(eventId);
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -151,7 +151,7 @@ const deleteSchedule = asyncHandler(async (req, res) => {
 
   const event = await Event.findById(eventId);
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -180,7 +180,7 @@ const getEvents = asyncHandler(async (req, res) => {
     query.isActive = true;
   }
 
-  if (req.user.type === 'organizer') query.organizerId = req.user._id;
+  if (req.user.type === 'organizer') query.organizerId = req.user.id;
   if (req.user.type === 'superadmin' && organizerId) query.organizerId = organizerId;
 
   if (search && search.trim()) {
@@ -236,7 +236,7 @@ const getEventById = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const event = await Event.findById(id).populate('organizerId', 'name email organizationName');
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId._id.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId._id.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
   successResponse(res, event);
@@ -246,7 +246,7 @@ const updateEvent = asyncHandler(async (req, res) => {
   const { id, schedules, ...updateData } = req.body;
   const event = await Event.findById(id);
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -290,7 +290,7 @@ const deleteEvent = asyncHandler(async (req, res) => {
   }
 
   if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
   event.isDeleted = true;
@@ -486,7 +486,7 @@ const registerByLink = asyncHandler(async (req, res) => {
 const getEventStats = asyncHandler(async (req, res) => {
   let query = { isDeleted: false };
   if (req.user.type === 'organizer') {
-    query.organizerId = req.user._id;
+    query.organizerId = req.user.id;
   }
 
   const totalEvents = await Event.countDocuments(query);
@@ -523,7 +523,7 @@ const getUpcomingEvents = asyncHandler(async (req, res) => {
   };
 
   if (req.user.type === 'organizer') {
-    query.organizerId = req.user._id;
+    query.organizerId = req.user.id;
   }
 
   const upcomingEvents = await Event.find(query)
@@ -607,7 +607,7 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
   const event = await Event.findById(eventId);
   if (!event) return errorResponse(res, 'Event not found', 404);
 
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -749,7 +749,7 @@ const getEventParticipants = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -805,7 +805,7 @@ const getEventStatusStats = asyncHandler(async (req, res) => {
   let query = { isDeleted: false };
 
   if (req.user.type === 'organizer') {
-    query.organizerId = req.user._id;
+    query.organizerId = req.user.id;
   }
 
   const allEvents = await Event.find(query);
@@ -853,7 +853,7 @@ const getAvailableParticipants = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -980,7 +980,7 @@ const addParticipantToEventComprehensive = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -1083,7 +1083,7 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
   if (!event.isActive) {
@@ -1212,7 +1212,7 @@ const removeParticipantFromEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -1238,7 +1238,7 @@ const removeParticipantFromEvent = asyncHandler(async (req, res) => {
 
 const scanQRForAttendance = asyncHandler(async (req, res) => {
   const { qrData } = req.body;
-  const scannerId = req.user._id;
+  const scannerId = req.user.id;
   const scannerType = req.user.type;
 
   if (!qrData) {
@@ -1337,7 +1337,7 @@ const scanQRForAttendance = asyncHandler(async (req, res) => {
 });
 
 const getAttendanceStats = asyncHandler(async (req, res) => {
-  const organizerId = req.user._id;
+  const organizerId = req.user.id;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);

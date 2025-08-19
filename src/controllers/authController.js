@@ -203,7 +203,7 @@ const loginApp = asyncHandler(async (req, res) => {
   delete userResponse.otpExpires;
   userResponse.role = role;
   
-  successResponse(res, { 
+  successResponse(res, {  
     message:'Login successful',
     data:{
       user: userResponse, 
@@ -389,14 +389,14 @@ const updateProfile = asyncHandler(async (req, res) => {
     // Check if user exists first
     const existingUser = await Model.findById(req.user._id);
     if (!existingUser) {
-      console.error('🔥 Update Profile - User not found:', req.user._id);
+      console.error('🔥 Update Profile - User not found:', req.user.id);
       return errorResponse(res, 'User not found', 404);
     }
     
     console.log('🔥 Update Profile - Existing user found:', existingUser.email);
     
     const user = await Model.findByIdAndUpdate(
-      req.user._id,
+      req.user.id,
       updateData,
       { new: true, runValidators: true }
     ).select('-password');

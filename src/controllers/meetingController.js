@@ -5,7 +5,7 @@ const Meeting = require("../models/meeting");
 
 const toggleShowSlots = asyncHandler(async (req, res) => {
   const { eventId, show } = req.body;
-  const userSlot = await UserEventSlot.findOne({ userId: req.user._id, userType: req.user.type, eventId });
+  const userSlot = await UserEventSlot.findOne({ userId: req.user.id, userType: req.user.type, eventId });
   if (!userSlot) return errorResponse(res, 'Slots not found', 404);
   userSlot.showSlots = show;
   await userSlot.save();
@@ -29,7 +29,7 @@ const requestMeeting = asyncHandler(async (req, res) => {
 
   const meeting = new Meeting({
     eventId,
-    requesterId: req.user._id,
+    requesterId: req.user.id,
     requesterType: req.user.type,
     requesteeId,
     requesteeType,
@@ -47,11 +47,11 @@ const requestMeeting = asyncHandler(async (req, res) => {
 const respondToMeeting = asyncHandler(async (req, res) => {
   const { meetingId, status } = req.body;
   const meeting = await Meeting.findById(meetingId);
-  if (!meeting || meeting.requesteeId.toString() !== req.user._id) return errorResponse(res, 'Invalid meeting', 404);
+  if (!meeting || meeting.requesteeId.toString() !== req.user.id) return errorResponse(res, 'Invalid meeting', 404);
   meeting.status = status;
   await meeting.save();
 
-  const userSlot = await UserEventSlot.findOne({ userId: req.user._id, userType: req.user.type, eventId: meeting.eventId });
+  const userSlot = await UserEventSlot.findOne({ userId: req.user.id, userType: req.user.type, eventId: meeting.eventId });
   const slotIndex = userSlot.slots.findIndex(s => s.meetingId.toString() === meetingId);
   if (slotIndex !== -1) {
     userSlot.slots[slotIndex].status = status === 'accepted' ? 'booked' : 'available';
@@ -64,7 +64,7 @@ const respondToMeeting = asyncHandler(async (req, res) => {
 // Get user's meetings grouped by date
 const getUserMeetingsByDate = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   let query = {
@@ -157,7 +157,7 @@ const getUserMeetingsByDate = asyncHandler(async (req, res) => {
 // Cancel a meeting
 const cancelMeeting = asyncHandler(async (req, res) => {
   const { meetingId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
 
   if (!meetingId) {
     return errorResponse(res, 'Meeting ID is required', 400);

@@ -57,7 +57,7 @@ organizerSchema.methods.isPasswordCorrect = async function (password) {
 organizerSchema.methods.generateAccessToken = function () {
   return jwt.sign(
     {
-      _id: this._id,
+      id: this._id,
       email: this.email,
       type: 'organizer'
     },

@@ -4,13 +4,31 @@ const connectDB = require('./config/database');
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const morgan = require('morgan'); // Added Morgan
 const app = express();
 const errorMiddleware = require('./middleware/errorMiddleware');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDoc = require('./swagger');
+
 // CORS configuration
 app.use(cors({}));
-app.set('etag',false);
+app.set('etag', false);
+
+// Morgan logging configuration
+if (process.env.NODE_ENV === 'production') {
+  // Use combined format in production (more detailed)
+  app.use(morgan('combined'));
+} else {
+  // Use dev format in development (colored output)
+  app.use(morgan('dev'));
+  
+  // Optional: Add custom token for request body in development
+  morgan.token('body', (req) => {
+    return JSON.stringify(req.body);
+  });
+  app.use(morgan(':method :url :status :response-time ms - :body'));
+}
+
 // Set up EJS as template engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));

@@ -10,7 +10,7 @@ const Attendance = require('../models/z-index').models.Attendance;
 
 // Get total connections for exhibitor/visitor across all events
 const getTotalConnections = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   // Get all scans where this user is the scanner
@@ -89,7 +89,7 @@ const getTotalConnections = asyncHandler(async (req, res) => {
 // Get event-wise detailed connections with scanned user details
 const getEventConnections = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   if (!eventId) {
@@ -173,7 +173,7 @@ const getEventConnections = asyncHandler(async (req, res) => {
 
 // Get all events where user is registered (for mobile app home screen)
 const getMyRegisteredEvents = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
   const currentDate = new Date();
 
@@ -248,7 +248,7 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
 
 // Get all events that user has attended (has scans in) - for mobile home screen
 const getAttendedEvents = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
   const currentDate = new Date();
 
@@ -321,7 +321,7 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
 // Record a new scan (when user scans someone's QR code)
 const recordScan = asyncHandler(async (req, res) => {
   const { scannedUserId, scannedUserType, eventId } = req.body;
-  const scannerId = req.user._id;
+  const scannerId = req.user.id;
   const scannerType = req.user.type;
 
   if (!scannedUserId || !scannedUserType || !eventId) {
@@ -384,7 +384,7 @@ const recordScan = asyncHandler(async (req, res) => {
 
 // Get scan statistics for mobile dashboard
 const getScanStatistics = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   // Get all scans by this user
@@ -425,7 +425,7 @@ const getScanStatistics = asyncHandler(async (req, res) => {
 // Get available slots of scanned users for meeting requests
 const getScannedUserSlots = asyncHandler(async (req, res) => {
   const { eventId, scannedUserId, scannedUserType } = req.body;
-  const currentUserId = req.user._id;
+  const currentUserId = req.user.id;
 
   if (!eventId || !scannedUserId || !scannedUserType) {
     return errorResponse(res, 'Event ID, scanned user ID, and user type are required', 400);
@@ -537,7 +537,7 @@ const filteredSlots = userSlots.slots.filter(slot => {
 // Send meeting request to a scanned user
 const sendMeetingRequest = asyncHandler(async (req, res) => {
   const { eventId, requestedId, requestedType, slotStart, slotEnd } = req.body;
-  const requesterId = req.user._id;
+  const requesterId = req.user.id;
   const requesterType = req.user.type;
 
   if (!eventId || !requestedId || !requestedType || !slotStart || !slotEnd) {
@@ -617,7 +617,7 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
 // Get pending meeting requests (for the current user)
 const getPendingMeetingRequests = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   let query = {
@@ -669,7 +669,7 @@ const getPendingMeetingRequests = asyncHandler(async (req, res) => {
 // Accept or reject meeting request
 const respondToMeetingRequest = asyncHandler(async (req, res) => {
   const { meetingId, status } = req.body; // status: 'accepted' or 'rejected'
-  const userId = req.user._id;
+  const userId = req.user.id;
 
   if (!meetingId || !status || !['accepted', 'rejected'].includes(status)) {
     return errorResponse(res, 'Meeting ID and valid status (accepted/rejected) are required', 400);
@@ -729,7 +729,7 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
 // Get confirmed meetings (day-wise)
 const getConfirmedMeetings = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   let query = {
@@ -810,7 +810,7 @@ const getConfirmedMeetings = asyncHandler(async (req, res) => {
 
 // Get mobile dashboard data (for home screen)
 const getMobileDashboard = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   // Get total connections
@@ -858,7 +858,7 @@ const getMobileDashboard = asyncHandler(async (req, res) => {
 
 // Get user's own profile
 const getMyProfile = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   let user;
@@ -880,7 +880,7 @@ const getMyProfile = asyncHandler(async (req, res) => {
 
 // Update user's own profile
 const updateMyProfile = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
   const updateData = req.body;
 
@@ -911,7 +911,7 @@ const updateMyProfile = asyncHandler(async (req, res) => {
 // Toggle slot visibility
 const toggleSlotVisibility = asyncHandler(async (req, res) => {
   const { eventId, showSlots } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   if (!eventId || typeof showSlots !== 'boolean') {
@@ -940,7 +940,7 @@ const toggleSlotVisibility = asyncHandler(async (req, res) => {
 // Get user's own slot status for an event
 const getMySlotStatus = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user.id;
   const userType = req.user.type;
 
   if (!eventId) {

@@ -38,7 +38,7 @@ const markAttendance = asyncHandler(async (req, res) => {
       userId: userId,
       userModel: role.charAt(0).toUpperCase() + role.slice(1),
       attendanceDate: today,
-      scannedBy: req.user._id,
+      scannedBy: req.user.id,
       scannedByModel: 'User',
       currentStatus: 'checked-in',
       attendanceDetails: [{ date: new Date(), entryTime: new Date() }]
@@ -55,7 +55,7 @@ const markAttendance = asyncHandler(async (req, res) => {
 // Get all attendance records with filtering
 const getAttendanceRecords = asyncHandler(async (req, res) => {
   const { eventId, userType, status, search, page = 1, limit = 50 } = req.body;
-  const organizerId = req.user._id;
+  const organizerId = req.user.id;
   const userRole = req.user.type;
 
   try {
@@ -185,7 +185,7 @@ const getAttendanceRecords = asyncHandler(async (req, res) => {
 // Get attendance statistics
 const getAttendanceStatistics = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
-  const organizerId = req.user._id;
+  const organizerId = req.user.id;
   const userRole = req.user.type;
 
   try {
@@ -293,7 +293,7 @@ const checkInUser = asyncHandler(async (req, res) => {
         eventId,
         userModel: userType.charAt(0).toUpperCase() + userType.slice(1),
         attendanceDate: today,
-        scannedBy: req.user._id,
+        scannedBy: req.user.id,
         scannedByModel: req.user.type === 'organizer' ? 'User' : 'User',
         currentStatus: 'checked-in',
         attendanceDetails: [{

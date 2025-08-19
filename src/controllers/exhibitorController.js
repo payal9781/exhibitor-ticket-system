@@ -23,7 +23,7 @@ const createExhibitor = asyncHandler(async (req, res) => {
 const getExhibitors = asyncHandler(async (req, res) => {
   const { search, status, page = 1, limit = 10, organizerId } = req.body;
   const userRole = req.user.type;
-  const currentUserId = req.user._id;
+  const currentUserId = req.user.id;
   
   let exhibitors;
   let total;
@@ -283,14 +283,14 @@ const updateMyProfile = asyncHandler(async (req, res) => {
 
   // Check if email or phone already exists (excluding current user)
   if (email && email !== exhibitor.email) {
-    const existingEmail = await Exhibitor.findOne({ email, _id: { $ne: req.user._id } });
+    const existingEmail = await Exhibitor.findOne({ email, _id: { $ne: req.user.id } });
     if (existingEmail) {
       return successResponse(res, { message: 'Email already exists', data: 0 });
     }
   }
 
   if (phone && phone !== exhibitor.phone) {
-    const existingPhone = await Exhibitor.findOne({ phone, _id: { $ne: req.user._id } });
+    const existingPhone = await Exhibitor.findOne({ phone, _id: { $ne: req.user.id } });
     if (existingPhone) {
       return successResponse(res, { message: 'Phone number already exists', data: 0 });
     }
@@ -321,7 +321,7 @@ const getMyEvents = asyncHandler(async (req, res) => {
 
   let query = {
     isDeleted: false,
-    'exhibitor.userId': req.user._id
+    'exhibitor.userId': req.user.id
   };
 
   // Only include active events unless specifically requested
@@ -337,7 +337,7 @@ const getMyEvents = asyncHandler(async (req, res) => {
   // Add status and QR code for each event
   const eventsWithDetails = events.map(event => {
     const eventObj = event.toObject();
-    const exhibitorData = event.exhibitor.find(ex => ex.userId.toString() === req.user._id);
+    const exhibitorData = event.exhibitor.find(ex => ex.userId.toString() === req.user.id);
 
     // Add status
     const eventEndDate = new Date(event.toDate);
@@ -368,7 +368,7 @@ const getMyEventStats = asyncHandler(async (req, res) => {
 
   const events = await Event.find({
     isDeleted: false,
-    'exhibitor.userId': req.user._id
+    'exhibitor.userId': req.user.id
   });
 
   const stats = {
@@ -402,8 +402,8 @@ const getMyEventStats = asyncHandler(async (req, res) => {
   const totalMeetings = await Meeting.countDocuments({
     eventId: { $in: eventIds },
     $or: [
-      { requesterId: req.user._id },
-      { requestedId: req.user._id }
+      { requesterId: req.user.id },
+      { requestedId: req.user.id }
     ],
     status: 'accepted'
   });
@@ -423,7 +423,7 @@ const getMyEventSlots = asyncHandler(async (req, res) => {
     _id: eventId,
     isDeleted: false,
     isActive: true,
-    'exhibitor.userId': req.user._id
+    'exhibitor.userId': req.user.id
   });
 
   if (!event) return errorResponse(res, 'Event not found or not registered', 404);
@@ -431,7 +431,7 @@ const getMyEventSlots = asyncHandler(async (req, res) => {
   // Get slots
   const userSlots = await UserEventSlot.findOne({
     eventId,
-    userId: req.user._id,
+    userId: req.user.id,
     userType: 'exhibitor'
   });
 
@@ -508,7 +508,7 @@ const toggleMySlotVisibility = asyncHandler(async (req, res) => {
   await UserEventSlot.updateMany(
     {
       eventId,
-      userId: req.user._id,
+      userId: req.user.id,
       userType: 'exhibitor'
     },
     { showSlots }
@@ -529,8 +529,8 @@ const getMyEventMeetings = asyncHandler(async (req, res) => {
   const meetings = await Meeting.find({
     eventId,
     $or: [
-      { requesterId: req.user._id },
-      { requestedId: req.user._id }
+      { requesterId: req.user.id },
+      { requestedId: req.user.id }
     ],
     status: 'accepted'
   })
@@ -548,13 +548,13 @@ const getMyEventMeetings = asyncHandler(async (req, res) => {
       meetingsByDate[date] = [];
     }
 
-    const otherParticipant = meeting.requesterId._id.toString() === req.user._id
+    const otherParticipant = meeting.requesterId._id.toString() === req.user.id
       ? meeting.requestedId
       : meeting.requesterId;
 
-    const otherParticipantType = meeting.requesterType === 'exhibitor' && meeting.requesterId._id.toString() === req.user._id
+    const otherParticipantType = meeting.requesterType === 'exhibitor' && meeting.requesterId._id.toString() === req.user.id
       ? meeting.requestedType
-      : meeting.requesterType === 'exhibitor' && meeting.requestedId._id.toString() === req.user._id
+      : meeting.requesterType === 'exhibitor' && meeting.requestedId._id.toString() === req.user.id
         ? meeting.requesterType
         : meeting.requestedType;
 
@@ -574,7 +574,7 @@ const getMyEventMeetings = asyncHandler(async (req, res) => {
         Sector: otherParticipant.Sector
       },
       otherParticipantType,
-      isRequester: meeting.requesterId._id.toString() === req.user._id
+      isRequester: meeting.requesterId._id.toString() === req.user.id
     });
   });
 
@@ -589,7 +589,7 @@ const getMyPendingRequests = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
 
   let query = {
-    requestedId: req.user._id,
+    requestedId: req.user.id,
     requestedType: 'exhibitor',
     status: 'pending'
   };
@@ -640,7 +640,7 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   if (!meeting) return errorResponse(res, 'Meeting request not found', 404);
 
   // Verify this is a request for the current user
-  if (meeting.requestedId.toString() !== req.user._id || meeting.status !== 'pending') {
+  if (meeting.requestedId.toString() !== req.user.id || meeting.status !== 'pending') {
     return errorResponse(res, 'Invalid meeting request', 400);
   }
 
@@ -651,7 +651,7 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   // Update slot status
   const userSlot = await UserEventSlot.findOne({
     eventId: meeting.eventId,
-    userId: req.user._id,
+    userId: req.user.id,
     userType: 'exhibitor'
   });
 

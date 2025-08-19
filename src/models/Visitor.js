@@ -23,7 +23,7 @@ const visitorSchema = new mongoose.Schema({
 visitorSchema.methods.generateAccessToken = function () {
   return jwt.sign(
     {
-      _id: this._id,
+      id: this._id,
       name: this.name,
       email: this.email,
       type: 'visitor'

@@ -8,7 +8,7 @@ const Scan = require('../models/Scan');
 
 // Get dashboard stats for organizers
 const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
-  const organizerId = req.user._id;
+  const organizerId = req.user.id;
   
   // Get total events for this organizer
   const totalEvents = await Event.countDocuments({ 
@@ -260,7 +260,7 @@ function getTimeAgo(date) {
 
 // Get organizer's attendee overview
 const getOrganizerAttendeeOverview = asyncHandler(async (req, res) => {
-  const organizerId = req.user._id;
+  const organizerId = req.user.id;
   
   // Get all events for this organizer
   const organizerEvents = await Event.find({ 

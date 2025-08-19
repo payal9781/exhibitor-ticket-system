@@ -69,7 +69,7 @@ const updateOrganizer = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Organizer not found', 404);
   }
 
-  if (req.user.type === 'organizer' && organizer._id.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && organizer._id.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 
@@ -148,7 +148,7 @@ const deleteOrganizer = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Organizer not found', 404);
   }
 
-  if (req.user.type === 'organizer' && organizer._id.toString() !== req.user._id) {
+  if (req.user.type === 'organizer' && organizer._id.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
 

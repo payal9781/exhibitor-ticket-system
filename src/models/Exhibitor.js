@@ -22,7 +22,7 @@ const exhibitorSchema = new mongoose.Schema({
 exhibitorSchema.methods.generateAccessToken = function () {
   return jwt.sign(
     {
-      _id: this._id,
+      id: this._id,
       name: this.companyName,
       email: this.email,
       type: 'exhibitor'
