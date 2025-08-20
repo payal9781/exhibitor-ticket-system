@@ -18,7 +18,8 @@ const {
   updateMyProfile,
   toggleSlotVisibility,
   getMySlotStatus,
-  getSchedules
+  getSchedules,
+  getAllExhibitorsForEvent
 } = require('../controllers/mobileController');
 
 // Mobile app routes for exhibitors and visitors
@@ -39,6 +40,7 @@ router.post('/my-profile', authMiddleware(['exhibitor', 'visitor']), getMyProfil
 router.post('/update-profile', authMiddleware(['exhibitor', 'visitor']), updateMyProfile);
 
 router.post('/get-schedules', authMiddleware(['exhibitor', 'visitor']), getSchedules);
+router.post('/get-all-exihibtors-for-event', authMiddleware(['exhibitor', 'visitor']), getAllExhibitorsForEvent);
 // Slot and meeting management routes
 router.post('/scanned-user-slots', authMiddleware(['exhibitor', 'visitor']), getScannedUserSlots);
 router.post('/send-meeting-request', authMiddleware(['exhibitor', 'visitor']), sendMeetingRequest);

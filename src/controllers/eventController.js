@@ -754,14 +754,14 @@ const getEventParticipants = asyncHandler(async (req, res) => {
   }
 
   const exhibitors = event.exhibitor.map(ex => ({
-    ...ex.userId.toObject(),
+    ...ex.userId,
     qrCode: ex.qrCode,
     registeredAt: ex.registeredAt,
     userType: 'exhibitor'
   }));
 
   const visitors = event.visitor.map(vis => ({
-    ...vis.userId.toObject(),
+    ...vis.userId,
     qrCode: vis.qrCode,
     registeredAt: vis.registeredAt,
     userType: 'visitor'

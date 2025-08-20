@@ -6,6 +6,7 @@ const Visitor = require('../models/Visitor');
 const Scan = require('../models/Scan');
 const Meeting = require('../models/z-index').models.Meeting;
 const UserEventSlot = require('../models/UserEventSlot');
+const { default: mongoose } = require('mongoose');
 const Attendance = require('../models/z-index').models.Attendance;
 
 // Get total connections for exhibitor/visitor across all events
@@ -1012,39 +1013,146 @@ const getSchedules = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event ID is required', 400);
   }
 
-  const event = await Event.findById(eventId);
-  if (!event) return errorResponse(res, 'Event not found', 404);
-  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
-    return errorResponse(res, 'Access denied', 403);
+  const event = await Event.aggregate([
+    {
+      $match:{
+        _id:new mongoose.Types.ObjectId(eventId)
+      }
+    },
+  {
+    $project:
+      /**
+       * specifications: The fields to
+       *   include or exclude.
+       */
+      {
+        schedules: 1
+      }
+  },
+  {
+    $unwind:
+      /**
+       * path: Path to the array field.
+       * includeArrayIndex: Optional name for index.
+       * preserveNullAndEmptyArrays: Optional
+       *   toggle to unwind null and empty values.
+       */
+      {
+        path: "$schedules"
+      }
+  },
+  {
+    $project:
+      /**
+       * specifications: The fields to
+       *   include or exclude.
+       */
+      {
+        activities: "$schedules.activities",
+        _id: 0
+      }
+  },
+  {
+    $unwind:
+      /**
+       * path: Path to the array field.
+       * includeArrayIndex: Optional name for index.
+       * preserveNullAndEmptyArrays: Optional
+       *   toggle to unwind null and empty values.
+       */
+      {
+        path: "$activities"
+      }
   }
-
-  if (mergeForDate) {
-    const targetDate = new Date(mergeForDate);
-    if (isNaN(targetDate.getTime())) {
-      return errorResponse(res, 'Invalid date format', 400);
-    }
-    const commonSchedule = event.schedules.find(s => s.date === null);
-    const specificSchedule = event.schedules.find(s => s.date && s.date.toDateString() === targetDate.toDateString());
-
-    const mergedActivities = [
-      ...(commonSchedule ? commonSchedule.activities : []),
-      ...(specificSchedule ? specificSchedule.activities : [])
-    ];
-
-    mergedActivities.sort((a, b) => a.startTime.localeCompare(b.startTime));
-
-    successResponse(res, {
-      message: 'Merged schedules for date',
-      date: targetDate,
-      activities: mergedActivities
-    });
-  } else {
+]).exec();
+  if (!event) return errorResponse(res, 'Event not found', 404);
     successResponse(res, {
       message: 'All schedules retrieved',
       schedules: event.schedules
     });
-  }
+
 });
+
+
+const getAllExhibitorsForEvent = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const event = await Event.aggregate([
+  {
+    $project:
+      /**
+       * specifications: The fields to
+       *   include or exclude.
+       */
+      {
+        exhibitor: 1
+      }
+  },
+  {
+    $unwind:
+      /**
+       * path: Path to the array field.
+       * includeArrayIndex: Optional name for index.
+       * preserveNullAndEmptyArrays: Optional
+       *   toggle to unwind null and empty values.
+       */
+      {
+        path: "$exhibitor"
+      }
+  },
+  {
+    $lookup:
+      /**
+       * from: The target collection.
+       * localField: The local join field.
+       * foreignField: The target join field.
+       * as: The name for the results.
+       * pipeline: Optional pipeline to run on the foreign collection.
+       * let: Optional variables to use in the pipeline field stages.
+       */
+      {
+        from: "exhibitors",
+        localField: "exhibitor.userId",
+        foreignField: "_id",
+        as: "exhibitor.userId"
+      }
+  },
+  {
+    $unwind:
+      /**
+       * path: Path to the array field.
+       * includeArrayIndex: Optional name for index.
+       * preserveNullAndEmptyArrays: Optional
+       *   toggle to unwind null and empty values.
+       */
+      {
+        path: "$exhibitor.userId"
+      }
+  },
+  {
+    $project:
+      /**
+       * specifications: The fields to
+       *   include or exclude.
+       */
+      {
+        exhibitor: "$exhibitor.userId"
+      }
+  }
+]).exec();
+
+    successResponse(res, {
+      message: 'All schedules retrieved',
+      exhibitors:event || []
+    });
+  
+});
+
+
 
 module.exports = {
   getTotalConnections,
@@ -1063,5 +1171,6 @@ module.exports = {
   updateMyProfile,
   toggleSlotVisibility,
   getMySlotStatus,
-  getSchedules
+  getSchedules,
+  getAllExhibitorsForEvent
 };
