@@ -1005,6 +1005,47 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
   });
 });
 
+const getSchedules = asyncHandler(async (req, res) => {
+  const { eventId, mergeForDate } = req.body;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  if (mergeForDate) {
+    const targetDate = new Date(mergeForDate);
+    if (isNaN(targetDate.getTime())) {
+      return errorResponse(res, 'Invalid date format', 400);
+    }
+    const commonSchedule = event.schedules.find(s => s.date === null);
+    const specificSchedule = event.schedules.find(s => s.date && s.date.toDateString() === targetDate.toDateString());
+
+    const mergedActivities = [
+      ...(commonSchedule ? commonSchedule.activities : []),
+      ...(specificSchedule ? specificSchedule.activities : [])
+    ];
+
+    mergedActivities.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    successResponse(res, {
+      message: 'Merged schedules for date',
+      date: targetDate,
+      activities: mergedActivities
+    });
+  } else {
+    successResponse(res, {
+      message: 'All schedules retrieved',
+      schedules: event.schedules
+    });
+  }
+});
+
 module.exports = {
   getTotalConnections,
   getEventConnections,
@@ -1021,5 +1062,6 @@ module.exports = {
   getMyProfile,
   updateMyProfile,
   toggleSlotVisibility,
-  getMySlotStatus
+  getMySlotStatus,
+  getSchedules
 };
