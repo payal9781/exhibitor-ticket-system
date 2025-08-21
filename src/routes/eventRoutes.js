@@ -24,7 +24,11 @@ const {
   addMultipleParticipantsToEvent,
   removeParticipantFromEvent,
   scanQRForAttendance,
-  getAttendanceStats
+  getAttendanceStats,
+  addSponsor,
+  updateSponsor,
+  removeSponsor,
+  getSponsors
 } = require('../controllers/eventController');
 const uploadMiddleware = require('../middleware/uploadMiddleware');
 
@@ -51,5 +55,9 @@ router.post('/add-multiple-participants', authMiddleware(['organizer', 'superAdm
 router.post('/remove-participant', authMiddleware(['organizer', 'superAdmin']), removeParticipantFromEvent);
 router.post('/scan-qr-attendance', authMiddleware(['organizer', 'superAdmin']), scanQRForAttendance);
 router.post('/attendance-stats', authMiddleware(['organizer', 'superAdmin']), getAttendanceStats);
+router.post('/add-sponsor', authMiddleware(['organizer', 'superAdmin']), addSponsor);
+router.post('/update-sponsor', authMiddleware(['organizer', 'superAdmin']), updateSponsor);
+router.post('/remove-sponsor', authMiddleware(['organizer', 'superAdmin']), removeSponsor);
+router.post('/get-sponsors', authMiddleware(['organizer', 'superAdmin', 'exhibitor', 'visitor']), getSponsors);
 
 module.exports = router;

@@ -9,6 +9,7 @@ const generateSlots = require('../utils/slotGenerator');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
 const moment = require('moment');
+const mongoose = require('mongoose');
 
 const createEvent = asyncHandler(async (req, res) => {
   const { schedules, ...eventData } = req.body;
@@ -1392,6 +1393,114 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
   }
 });
 
+const addSponsor = asyncHandler(async (req, res) => {
+  const { eventId, sponsorData } = req.body;
+
+  if (!eventId || !sponsorData || !sponsorData.name) {
+    return errorResponse(res, 'Event ID and sponsor name are required', 400);
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  const newSponsor = {
+    name: sponsorData.name,
+    logo: sponsorData.logo,
+    description: sponsorData.description,
+    website: sponsorData.website,
+    tier: sponsorData.tier,
+    addedAt: new Date()
+  };
+
+  event.sponsors.push(newSponsor);
+  await event.save();
+
+  successResponse(res, {
+    message: 'Sponsor added successfully',
+    sponsor: event.sponsors[event.sponsors.length - 1]
+  });
+});
+
+const updateSponsor = asyncHandler(async (req, res) => {
+  const { eventId, sponsorId, sponsorData } = req.body;
+
+  if (!eventId || !sponsorId || !sponsorData) {
+    return errorResponse(res, 'Event ID, sponsor ID, and update data are required', 400);
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  const sponsor = event.sponsors.id(sponsorId);
+  if (!sponsor) {
+    return errorResponse(res, 'Sponsor not found', 404);
+  }
+
+  if (sponsorData.name) sponsor.name = sponsorData.name;
+  if (sponsorData.logo) sponsor.logo = sponsorData.logo;
+  if (sponsorData.description) sponsor.description = sponsorData.description;
+  if (sponsorData.website) sponsor.website = sponsorData.website;
+  if (sponsorData.tier) sponsor.tier = sponsorData.tier;
+
+  await event.save();
+
+  successResponse(res, {
+    message: 'Sponsor updated successfully',
+    sponsor
+  });
+});
+
+const removeSponsor = asyncHandler(async (req, res) => {
+  const { eventId, sponsorId } = req.body;
+
+  if (!eventId || !sponsorId) {
+    return errorResponse(res, 'Event ID and sponsor ID are required', 400);
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) return errorResponse(res, 'Event not found', 404);
+
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  const sponsor = event.sponsors.id(sponsorId);
+  if (!sponsor) {
+    return errorResponse(res, 'Sponsor not found', 404);
+  }
+
+  event.sponsors.pull(sponsorId);
+  await event.save();
+
+  successResponse(res, {
+    message: 'Sponsor removed successfully'
+  });
+});
+
+const getSponsors = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const event = await Event.findById(eventId).select('sponsors');
+  if (!event) return errorResponse(res, 'Event not found', 404);
+
+  successResponse(res, {
+    sponsors: event.sponsors,
+    total: event.sponsors.length
+  });
+});
+
 module.exports = {
   createEvent,
   addOrUpdateSchedule,
@@ -1415,5 +1524,9 @@ module.exports = {
   addMultipleParticipantsToEvent,
   removeParticipantFromEvent,
   scanQRForAttendance,
-  getAttendanceStats
+  getAttendanceStats,
+  addSponsor,
+  updateSponsor,
+  removeSponsor,
+  getSponsors
 };

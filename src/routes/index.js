@@ -3,6 +3,7 @@ const router = express.Router();
 
 router.use('/auth', require('./authRoutes'));
 router.use('/events', require('./eventRoutes'));
+router.use('/categories', require('./categoryRoutes'));
 router.use('/organizers', require('./organizerRoutes'));
 router.use('/exhibitors', require('./exhibitorRoutes'));
 router.use('/visitors', require('./visitorRoutes'));

@@ -28,13 +28,22 @@ const eventSchema = new mongoose.Schema({
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now }
   }],
+  sponsors: [{
+    name: { type: String, required: true },
+    logo: { type: String },
+    description: { type: String },
+    website: { type: String },
+    tier: { type: String },
+    addedAt: { type: Date, default: Date.now }
+  }],
   schedules: [{
     date: { type: Date, default: null }, // null for common schedules applying to all days
     activities: [{
       startTime: { type: String, required: true }, // Format: "HH:MM"
       endTime: { type: String, required: true }, // Format: "HH:MM"
       title: { type: String, required: true },
-      description: { type: String }
+      description: { type: String },
+      category: { type: String } // e.g., 'session', 'break', 'keynote', etc.
     }]
   }]
 }, { timestamps: true });

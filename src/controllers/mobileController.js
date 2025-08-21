@@ -1040,29 +1040,6 @@ const getSchedules = asyncHandler(async (req, res) => {
       {
         path: "$schedules"
       }
-  },
-  {
-    $project:
-      /**
-       * specifications: The fields to
-       *   include or exclude.
-       */
-      {
-        activities: "$schedules.activities",
-        _id: 0
-      }
-  },
-  {
-    $unwind:
-      /**
-       * path: Path to the array field.
-       * includeArrayIndex: Optional name for index.
-       * preserveNullAndEmptyArrays: Optional
-       *   toggle to unwind null and empty values.
-       */
-      {
-        path: "$activities"
-      }
   }
 ]).exec();
   if (!event) return errorResponse(res, 'Event not found', 404);
@@ -1076,82 +1053,213 @@ const getSchedules = asyncHandler(async (req, res) => {
 
 const getAllExhibitorsForEvent = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
+  const userId = req.user.id;
 
   if (!eventId) {
     return errorResponse(res, 'Event ID is required', 400);
   }
 
-  const event = await Event.aggregate([
-  {
-    $project:
-      /**
-       * specifications: The fields to
-       *   include or exclude.
-       */
-      {
+  // Find scan records where the current user is the scanner and eventId matches
+  const scanRecords = await Scan.find({
+    scanner: userId,
+    eventId: eventId
+  }).select('scannedUser');
+
+  // Extract scanned user IDs as strings
+  const scannedUserIds = scanRecords.flatMap(record =>
+    record.scannedUser.map(id => new mongoose.Types.ObjectId(id))
+  );
+
+  const exhibitors = await Event.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(eventId)
+      }
+    },
+    {
+      $project: {
         exhibitor: 1
       }
-  },
-  {
-    $unwind:
-      /**
-       * path: Path to the array field.
-       * includeArrayIndex: Optional name for index.
-       * preserveNullAndEmptyArrays: Optional
-       *   toggle to unwind null and empty values.
-       */
-      {
-        path: "$exhibitor"
+    },
+    {
+      $unwind: {
+        path: '$exhibitor'
       }
-  },
-  {
-    $lookup:
-      /**
-       * from: The target collection.
-       * localField: The local join field.
-       * foreignField: The target join field.
-       * as: The name for the results.
-       * pipeline: Optional pipeline to run on the foreign collection.
-       * let: Optional variables to use in the pipeline field stages.
-       */
-      {
-        from: "exhibitors",
-        localField: "exhibitor.userId",
-        foreignField: "_id",
-        as: "exhibitor.userId"
+    },
+    {
+      $lookup: {
+        from: 'exhibitors',
+        localField: 'exhibitor.userId',
+        foreignField: '_id',
+        as: 'exhibitor.userId'
       }
-  },
-  {
-    $unwind:
-      /**
-       * path: Path to the array field.
-       * includeArrayIndex: Optional name for index.
-       * preserveNullAndEmptyArrays: Optional
-       *   toggle to unwind null and empty values.
-       */
-      {
-        path: "$exhibitor.userId"
+    },
+    {
+      $unwind: {
+        path: '$exhibitor.userId'
       }
-  },
-  {
-    $project:
-      /**
-       * specifications: The fields to
-       *   include or exclude.
-       */
-      {
-        exhibitor: "$exhibitor.userId"
+    },
+    {
+      $project: {
+        exhibitor: '$exhibitor.userId',
+        scanned: {
+          $cond: {
+            if: {
+              $in: ['$exhibitor.userId._id', scannedUserIds]
+            },
+            then: true,
+            else: false
+          }
+        }
       }
-  }
-]).exec();
+    },
+    {
+      $project: {
+        _id: '$exhibitor._id',
+        companyName: '$exhibitor.companyName',
+        email: '$exhibitor.email',
+        phone: '$exhibitor.phone',
+        profileImage: '$exhibitor.profileImage',
+        bio: '$exhibitor.bio',
+        Sector: '$exhibitor.Sector',
+        location: '$exhibitor.location',
+        scanned: 1
+      }
+    }
+  ]).exec();
 
-    successResponse(res, {
-      message: 'All schedules retrieved',
-      exhibitors:event || []
-    });
-  
+  successResponse(res, {
+    message: 'All exhibitors retrieved',
+    exhibitors: exhibitors || []
+  });
 });
 
+const getAllMeetings = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  const userId = req.user.id;
+  const userType = req.user.type;
+
+  // Query for pending meetings
+  let pendingQuery = {
+    requestedId: userId,
+    requestedType: userType,
+    status: 'pending'
+  };
+
+  // Query for confirmed meetings
+  let confirmedQuery = {
+    $or: [
+      { requesterId: userId, requesterType: userType },
+      { requestedId: userId, requestedType: userType }
+    ],
+    status: 'accepted'
+  };
+
+  if (eventId) {
+    pendingQuery.eventId = eventId;
+    confirmedQuery.eventId = eventId;
+  }
+
+  // Fetch both pending and confirmed meetings
+  const [pendingMeetings, confirmedMeetings] = await Promise.all([
+    Meeting.find(pendingQuery)
+      .populate('eventId', 'title fromDate toDate location')
+      .sort({ createdAt: -1 }),
+    Meeting.find(confirmedQuery)
+      .populate('eventId', 'title fromDate toDate location')
+      .sort({ slotStart: 1 })
+  ]);
+
+  // Process pending meetings
+  const pendingRequestsWithDetails = await Promise.all(
+    pendingMeetings.map(async (request) => {
+      let requesterDetails;
+      if (request.requesterType === 'exhibitor') {
+        requesterDetails = await Exhibitor.findById(request.requesterId)
+          .select('companyName email phone profileImage bio Sector location');
+      } else {
+        requesterDetails = await Visitor.findById(request.requesterId)
+          .select('name email phone profileImage bio Sector location companyName');
+      }
+
+      return {
+        _id: request._id,
+        eventId: request.eventId._id,
+        eventTitle: request.eventId.title,
+        eventLocation: request.eventId.location,
+        slotStart: request.slotStart,
+        slotEnd: request.slotEnd,
+        status: request.status,
+        createdAt: request.createdAt,
+        requester: requesterDetails,
+        requesterType: request.requesterType,
+        canRespond: request.requestedId.toString() === userId.toString() // Indicates if user can respond
+      };
+    })
+  );
+
+  // Process confirmed meetings
+  const confirmedMeetingsWithDetails = await Promise.all(
+    confirmedMeetings.map(async (meeting) => {
+      let otherParticipant;
+      let otherParticipantType;
+
+      if (meeting.requesterId.toString() === userId.toString()) {
+        // Current user is the requester, get requested user details
+        otherParticipantType = meeting.requestedType;
+        if (meeting.requestedType === 'exhibitor') {
+          otherParticipant = await Exhibitor.findById(meeting.requestedId)
+            .select('companyName email phone profileImage bio Sector location');
+        } else {
+          otherParticipant = await Visitor.findById(meeting.requestedId)
+            .select('name email phone profileImage bio Sector location companyName');
+        }
+      } else {
+        // Current user is the requested user, get requester details
+        otherParticipantType = meeting.requesterType;
+        if (meeting.requesterType === 'exhibitor') {
+          otherParticipant = await Exhibitor.findById(meeting.requesterId)
+            .select('companyName email phone profileImage bio Sector location');
+        } else {
+          otherParticipant = await Visitor.findById(meeting.requesterId)
+            .select('name email phone profileImage bio Sector location companyName');
+        }
+      }
+
+      return {
+        _id: meeting._id,
+        eventId: meeting.eventId._id,
+        eventTitle: meeting.eventId.title,
+        eventLocation: meeting.eventId.location,
+        slotStart: meeting.slotStart,
+        slotEnd: meeting.slotEnd,
+        status: meeting.status,
+        createdAt: meeting.createdAt,
+        otherParticipant,
+        otherParticipantType,
+        isRequester: meeting.requesterId.toString() === userId.toString(),
+        canRespond: false // Confirmed meetings don't need response
+      };
+    })
+  );
+
+  // Group confirmed meetings by date
+  const meetingsByDate = {};
+  confirmedMeetingsWithDetails.forEach(meeting => {
+    const dateKey = meeting.slotStart.toISOString().split('T')[0];
+    if (!meetingsByDate[dateKey]) {
+      meetingsByDate[dateKey] = [];
+    }
+    meetingsByDate[dateKey].push(meeting);
+  });
+
+  successResponse(res, {
+  totalPendingRequests: pendingRequestsWithDetails.length,
+  pendingRequests: pendingRequestsWithDetails,
+  totalConfirmedMeetings: confirmedMeetingsWithDetails.length,
+  confirmedMeetingsByDate: meetingsByDate
+});
+});
 
 
 module.exports = {
@@ -1172,5 +1280,6 @@ module.exports = {
   toggleSlotVisibility,
   getMySlotStatus,
   getSchedules,
-  getAllExhibitorsForEvent
+  getAllExhibitorsForEvent,
+  getAllMeetings
 };
