@@ -1045,7 +1045,7 @@ const getSchedules = asyncHandler(async (req, res) => {
   if (!event) return errorResponse(res, 'Event not found', 404);
     successResponse(res, {
       message: 'All schedules retrieved',
-      schedules: event.schedules
+      schedules: event
     });
 
 });
