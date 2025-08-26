@@ -244,11 +244,20 @@ const getEventById = asyncHandler(async (req, res) => {
 });
 
 const updateEvent = asyncHandler(async (req, res) => {
-  const { id, schedules, ...updateData } = req.body;
+  const { id, schedules, fromDate, toDate, ...updateData } = req.body;
   const event = await Event.findById(id);
   if (!event) return errorResponse(res, 'Event not found', 404);
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
+  }
+
+  // Check if event has exhibitors or visitors
+  const hasExhibitors = event.exhibitor && event.exhibitor.length > 0;
+  const hasVisitors = event.visitor && event.visitor.length > 0;
+
+  // Prevent updating fromDate or toDate if exhibitors or visitors exist
+  if ((hasExhibitors || hasVisitors) && (fromDate || toDate)) {
+    return errorResponse(res, 'Cannot update event dates when exhibitors or visitors are associated', 400);
   }
 
   if (schedules) {
@@ -267,9 +276,11 @@ const updateEvent = asyncHandler(async (req, res) => {
       }
       if (schedule.date) {
         const scheduleDate = new Date(schedule.date);
+        const eventFromDate = fromDate ? new Date(fromDate) : event.fromDate;
+        const eventToDate = toDate ? new Date(toDate) : event.toDate;
         if (isNaN(scheduleDate.getTime()) || 
-            scheduleDate < new Date(event.fromDate) || 
-            scheduleDate > new Date(event.toDate)) {
+            scheduleDate < eventFromDate || 
+            scheduleDate > eventToDate) {
           return errorResponse(res, 'Schedule date must be within event date range', 400);
         }
       }
@@ -277,7 +288,11 @@ const updateEvent = asyncHandler(async (req, res) => {
     event.schedules = schedules;
   }
 
+  // Update other fields
   Object.assign(event, updateData);
+  if (fromDate) event.fromDate = fromDate;
+  if (toDate) event.toDate = toDate;
+
   await event.save();
   successResponse(res, event);
 });
@@ -286,14 +301,18 @@ const deleteEvent = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const event = await Event.findById(id);
 
-  if (event.exhibitor.length > 0 || event.visitor.length > 0) {
-    return successResponse(res, { message: 'Event has exhibitors or visitors, so it cannot be deleted', status: 400 });
+  if (!event) {
+    return errorResponse(res, 'Event not found', 404);
   }
 
-  if (!event) return errorResponse(res, 'Event not found', 404);
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
     return errorResponse(res, 'Access denied', 403);
   }
+
+  if (event.exhibitor.length > 0 || event.visitor.length > 0) {
+    return errorResponse(res, 'Event has exhibitors or visitors, so it cannot be deleted', 400);
+  }
+
   event.isDeleted = true;
   await event.save();
   successResponse(res, { message: 'Event deleted' });

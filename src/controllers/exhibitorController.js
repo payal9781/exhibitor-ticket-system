@@ -7,41 +7,196 @@ const Visitor = require('../models/Visitor');
 const axios = require('axios');
 const UserEventSlot = require('../models/UserEventSlot');
 const Meeting = require('../models/z-index').models.Meeting;
-
+const mongoose = require('mongoose');
+const generateSlots = require('../utils/slotGenerator');
 const createExhibitor = asyncHandler(async (req, res) => {
-  const exhibitor = new Exhibitor(req.body);
-  const isExists = await Exhibitor.findOne({ email: exhibitor.email });
-  if (isExists && !isExists?.isDeleted && isExists?.isActive) {
-    return errorResponse(res, 'Email already exists', 409)
-  }
-  if (isExists && isExists?.isDeleted) {
-    return errorResponse(res, 'contact to adminitrator', 409)
+  const { eventId, ...exhibitorData } = req.body;
+  let exhibitor;
+  let isNewExhibitor = false;
+
+  // Check if exhibitor already exists by phone or email
+  if (exhibitorData.phone) {
+    exhibitor = await Exhibitor.findOne({
+      phone: exhibitorData.phone,
+      isDeleted: false
+    });
   }
 
-  const payload = {
-    name: String(exhibitor.name).trim(),
-    email: exhibitor.email,
-    mobile: exhibitor.phone,
-    businessKeyword: "Event",
-    originId: "67ca6934c15747af04fff36c",
-    countryCode: "91"
-  };
+  if (!exhibitor && exhibitorData.email) {
+    exhibitor = await Exhibitor.findOne({
+      email: exhibitorData.email,
+      isDeleted: false
+    });
+  }
 
-  try {
-    const DIGITAL_CARD_URL = "https://digitalcard.co.in/web/create-account/mobile";
-    var result = await axios.post(DIGITAL_CARD_URL, payload, {
-      headers: {
-        'Content-Type': 'application/json'
+  if (exhibitor) {
+    // Update existing exhibitor with new data if provided
+    Object.keys(exhibitorData).forEach(key => {
+      if (exhibitorData[key] && exhibitorData[key] !== '' && key !== 'keyWords') {
+        exhibitor[key] = exhibitorData[key];
       }
     });
-    if (result.data != null) { exhibitor.digitalProfile = result.data.path; }
-    else { console.log(`Something went wrong while creating digital card: ${result.data}`); }
-  } catch (err) {
-    console.log(`Error in creating digital card: ${err}`);
+    if (exhibitorData.keyWords) {
+      exhibitor.keyWords = exhibitorData.keyWords;
+    }
+  } else {
+    // Check for deleted exhibitor with same email
+    if (exhibitorData.email) {
+      const deletedExhibitor = await Exhibitor.findOne({
+        email: exhibitorData.email,
+        isDeleted: true
+      });
+      if (deletedExhibitor) {
+        return errorResponse(res, 'Contact administrator', 409);
+      }
+    }
+    // Create new exhibitor
+    exhibitor = new Exhibitor({
+      ...exhibitorData,
+      isActive: true
+    });
+
+    // Create digital card
+    try {
+      const payload = {
+        name: String(exhibitor.companyName || '').trim(),
+        email: exhibitor.email || '',
+        mobile: exhibitor.phone,
+        businessKeyword: 'Event Exhibitor',
+        originId: '67ca6934c15747af04fff36c',
+        countryCode: '91'
+      };
+      console.log(payload);
+      const DIGITAL_CARD_URL = 'https://digitalcard.co.in/web/create-account/mobile';
+      const result = await axios.post(DIGITAL_CARD_URL, payload, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (result.data?.data?.path) {
+        exhibitor.digitalProfile = result.data.data.path;
+      } else {
+        console.log(`Something went wrong while creating digital card: ${JSON.stringify(result.data)}`);
+      }
+    } catch (err) {
+      console.log(`Error in creating digital card: ${err}`);
+    }
+
+    isNewExhibitor = true;
   }
 
+  // Save exhibitor
   await exhibitor.save();
-  successResponse(res, exhibitor, 201);
+
+  // If eventId is provided, add exhibitor to the event
+  let qrCode = null;
+  let event = null;
+  if (eventId && eventId !== 'none') {
+    event = await Event.findById(eventId);
+    if (!event) {
+      return errorResponse(res, 'Event not found', 404);
+    }
+    if (!event.isActive) {
+      return errorResponse(res, 'Cannot add exhibitor to inactive event', 400);
+    }
+    if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+      return errorResponse(res, 'Access denied', 403);
+    }
+
+    // Check if registration is allowed (before event endDate)
+    const currentDate = new Date();
+    const eventEndDate = new Date(event.toDate);
+    if (currentDate > eventEndDate) {
+      return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
+    }
+
+    // Check if exhibitor is already registered
+    const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
+    if (existingExhibitor) {
+      return successResponse(res, {
+        message: 'Exhibitor is already registered for this event',
+        exhibitor: {
+          _id: exhibitor._id,
+          companyName: exhibitor.companyName,
+          email: exhibitor.email,
+          phone: exhibitor.phone
+        },
+        isNewExhibitor,
+        alreadyRegistered: true,
+        qrCode: existingExhibitor.qrCode,
+        event: {
+          _id: event._id,
+          title: event.title,
+          fromDate: event.fromDate,
+          toDate: event.toDate
+        }
+      });
+    }
+
+    // Generate QR code
+    const qrData = {
+      eventId: event._id,
+      userId: exhibitor._id,
+      userType: 'exhibitor',
+      startDate: event.fromDate,
+      endDate: event.toDate,
+      eventTitle: event.title
+    };
+    qrCode = await require('../utils/qrGenerator')(qrData);
+
+    // Add exhibitor to event with QR code
+    event.exhibitor.push({
+      userId: exhibitor._id,
+      qrCode,
+      registeredAt: new Date()
+    });
+
+    // Generate slots for the exhibitor
+    try {
+      const existingSlots = await UserEventSlot.findOne({
+        userId: exhibitor._id,
+        userType: 'exhibitor',
+        eventId
+      });
+
+      if (!existingSlots) {
+        const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+        const slots = rawSlots.map(s => ({
+          start: s.start,
+          end: s.end,
+          status: 'available',
+          showSlots: false
+        }));
+        const userSlot = new UserEventSlot({
+          userId: exhibitor._id,
+          userType: 'exhibitor',
+          eventId,
+          slots
+        });
+        await userSlot.save();
+      }
+    } catch (slotError) {
+      console.error('Error generating slots:', slotError);
+    }
+
+    await event.save();
+  }
+
+  successResponse(res, {
+    message: isNewExhibitor ? 'Exhibitor created successfully' : 'Exhibitor updated successfully',
+    exhibitor: {
+      _id: exhibitor._id,
+      companyName: exhibitor.companyName,
+      email: exhibitor.email,
+      phone: exhibitor.phone
+    },
+    isNewExhibitor,
+    qrCode,
+    event: event ? {
+      _id: event._id,
+      title: event.title,
+      fromDate: event.fromDate,
+      toDate: event.toDate
+    } : null
+  }, isNewExhibitor ? 201 : 200);
 });
 
 const getExhibitors = asyncHandler(async (req, res) => {
@@ -62,7 +217,7 @@ const getExhibitors = asyncHandler(async (req, res) => {
       isDeleted: false 
     }).select('_id');
     
-    const eventIds = organizerEvents.map(event => event._id);
+    const eventIds = organizerEvents.map(event => new mongoose.Types.ObjectId(event._id));
     
     // Find exhibitors who have attended these events
     const attendedExhibitors = await Event.aggregate([
@@ -180,9 +335,19 @@ const updateExhibitor = asyncHandler(async (req, res) => {
 });
 
 const deleteExhibitor = asyncHandler(async (req, res) => {
-  const { id } = req.body; // Changed from params to body
+  const { id } = req.body;
   const exhibitor = await Exhibitor.findById(id);
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
+
+  // Check if exhibitor is associated with any active event
+  const eventWithExhibitor = await Event.findOne({
+    'exhibitor.userId': id,
+  });
+
+  if (eventWithExhibitor) {
+    return errorResponse(res, 'Cannot delete exhibitor associated with an active event', 400);
+  }
+
   exhibitor.isDeleted = true;
   await exhibitor.save();
   successResponse(res, { message: 'Exhibitor deleted' });
@@ -198,9 +363,34 @@ const getOrganizersEventWise = asyncHandler(async (req, res) => {
 });
 
 const getEventsOrganizerWise = asyncHandler(async (req, res) => {
-  const { organizerId } = req.body; // Changed from query to body
-  const events = await Event.find({ organizerId });
-  successResponse(res, events);
+  const { organizerId } = req.body;
+  const currentDate = new Date();
+  // Set to start of the current day in UTC
+  const startOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+
+  // Determine the organizer ID to query
+  let queryOrganizerId = organizerId;
+  if (req.user.type === 'organizer' && !req.user.isSuperAdmin) {
+    queryOrganizerId = req.user.id;
+  } else if (!organizerId && req.user.type === 'superAdmin') {
+    queryOrganizerId = null;
+  }
+
+  // Build query
+  const query = {
+    toDate: { $gte: startOfDay },
+    isDeleted: false,
+    isActive: true,
+    ...(queryOrganizerId ? { organizerId: queryOrganizerId } : {}),
+  };
+
+  // Fetch events
+  const events = await Event.find(query)
+    .select('_id title fromDate toDate location startTime endTime description registrationLink media exhibitor visitor sponsors organizerId schedules isActive isDeleted createdAt updatedAt')
+    .populate('organizerId', '_id name email organizationName')
+    .sort({ fromDate: 1 });
+
+  successResponse(res, { events });
 });
 
 const getParticipantsEventWise = asyncHandler(async (req, res) => {

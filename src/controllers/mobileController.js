@@ -1139,28 +1139,24 @@ const getAllMeetings = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const userType = req.user.type;
 
-  // Query for pending meetings
+  console.log('User:', { userId, userType, eventId });
+
   let pendingQuery = {
     requestedId: userId,
     requestedType: userType,
-    status: 'pending'
+    status: 'pending',
+    ...(eventId && { eventId })
   };
 
-  // Query for confirmed meetings
   let confirmedQuery = {
     $or: [
       { requesterId: userId, requesterType: userType },
       { requestedId: userId, requestedType: userType }
     ],
-    status: 'accepted'
+    status: 'accepted',
+    ...(eventId && { eventId })
   };
 
-  if (eventId) {
-    pendingQuery.eventId = eventId;
-    confirmedQuery.eventId = eventId;
-  }
-
-  // Fetch both pending and confirmed meetings
   const [pendingMeetings, confirmedMeetings] = await Promise.all([
     Meeting.find(pendingQuery)
       .populate('eventId', 'title fromDate toDate location')
@@ -1170,7 +1166,8 @@ const getAllMeetings = asyncHandler(async (req, res) => {
       .sort({ slotStart: 1 })
   ]);
 
-  // Process pending meetings
+  console.log('Pending Meetings:', pendingMeetings);
+
   const pendingRequestsWithDetails = await Promise.all(
     pendingMeetings.map(async (request) => {
       let requesterDetails;
@@ -1184,28 +1181,26 @@ const getAllMeetings = asyncHandler(async (req, res) => {
 
       return {
         _id: request._id,
-        eventId: request.eventId._id,
-        eventTitle: request.eventId.title,
-        eventLocation: request.eventId.location,
+        eventId: request.eventId?._id || null,
+        eventTitle: request.eventId?.title || 'N/A',
+        eventLocation: request.eventId?.location || 'N/A',
         slotStart: request.slotStart,
         slotEnd: request.slotEnd,
         status: request.status,
         createdAt: request.createdAt,
-        requester: requesterDetails,
+        requester: requesterDetails || {},
         requesterType: request.requesterType,
-        canRespond: request.requestedId.toString() === userId.toString() // Indicates if user can respond
+        canRespond: request.requestedId.toString() === userId.toString()
       };
     })
   );
 
-  // Process confirmed meetings
   const confirmedMeetingsWithDetails = await Promise.all(
     confirmedMeetings.map(async (meeting) => {
       let otherParticipant;
       let otherParticipantType;
 
       if (meeting.requesterId.toString() === userId.toString()) {
-        // Current user is the requester, get requested user details
         otherParticipantType = meeting.requestedType;
         if (meeting.requestedType === 'exhibitor') {
           otherParticipant = await Exhibitor.findById(meeting.requestedId)
@@ -1215,7 +1210,6 @@ const getAllMeetings = asyncHandler(async (req, res) => {
             .select('name email phone profileImage bio Sector location companyName');
         }
       } else {
-        // Current user is the requested user, get requester details
         otherParticipantType = meeting.requesterType;
         if (meeting.requesterType === 'exhibitor') {
           otherParticipant = await Exhibitor.findById(meeting.requesterId)
@@ -1228,22 +1222,21 @@ const getAllMeetings = asyncHandler(async (req, res) => {
 
       return {
         _id: meeting._id,
-        eventId: meeting.eventId._id,
-        eventTitle: meeting.eventId.title,
-        eventLocation: meeting.eventId.location,
+        eventId: meeting.eventId?._id || null,
+        eventTitle: meeting.eventId?.title || 'N/A',
+        eventLocation: meeting.eventId?.location || 'N/A',
         slotStart: meeting.slotStart,
         slotEnd: meeting.slotEnd,
         status: meeting.status,
         createdAt: meeting.createdAt,
-        otherParticipant,
+        otherParticipant: otherParticipant || {},
         otherParticipantType,
         isRequester: meeting.requesterId.toString() === userId.toString(),
-        canRespond: false // Confirmed meetings don't need response
+        canRespond: false
       };
     })
   );
 
-  // Group confirmed meetings by date
   const meetingsByDate = {};
   confirmedMeetingsWithDetails.forEach(meeting => {
     const dateKey = meeting.slotStart.toISOString().split('T')[0];
@@ -1254,13 +1247,48 @@ const getAllMeetings = asyncHandler(async (req, res) => {
   });
 
   successResponse(res, {
-  totalPendingRequests: pendingRequestsWithDetails.length,
-  pendingRequests: pendingRequestsWithDetails,
-  totalConfirmedMeetings: confirmedMeetingsWithDetails.length,
-  confirmedMeetingsByDate: meetingsByDate
-});
+    totalPendingRequests: pendingRequestsWithDetails.length,
+    pendingRequests: pendingRequestsWithDetails,
+    totalConfirmedMeetings: confirmedMeetingsWithDetails.length,
+    confirmedMeetingsByDate: meetingsByDate
+  }, 200);
 });
 
+const getScans = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  const scanner = req.user.id;
+
+  if (!eventId || !scanner) {
+    return errorResponse(res, 'eventId and scanner are required', 400);
+  }
+
+  const scans = await Scan.find({ eventId, scanner }).sort({ createdAt: -1 });
+
+  const populatedScans = await Promise.all(scans.map(async (scan) => {
+    let populatedUsers = [];
+    let userType = '';
+
+    // First try to populate with Exhibitor
+    populatedUsers = await Exhibitor.find({ _id: { $in: scan.scannedUser } }).lean();
+    
+    if (populatedUsers.length > 0) {
+      userType = 'exhibitor';
+    } else {
+      // If no exhibitors found, try Visitor
+      populatedUsers = await Visitor.find({ _id: { $in: scan.scannedUser } }).lean();
+      userType = populatedUsers.length > 0 ? 'visitor' : '';
+    }
+
+    populatedUsers[0].userType = userType;
+    return {
+      ...scan.toObject(),
+      scannedUsers: populatedUsers,
+      userType
+    };
+  }));
+
+  successResponse(res, { scans: populatedScans }, 200);
+});
 
 module.exports = {
   getTotalConnections,
@@ -1281,5 +1309,6 @@ module.exports = {
   getMySlotStatus,
   getSchedules,
   getAllExhibitorsForEvent,
-  getAllMeetings
+  getAllMeetings,
+  getScans
 };

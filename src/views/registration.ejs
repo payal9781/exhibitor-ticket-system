@@ -28,6 +28,11 @@
             transform: translateY(-2px);
             box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
         }
+        .error-message {
+            color: #dc2626;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -150,7 +155,8 @@
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Website</label>
-                                <input type="url" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <input type="text" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <p id="exhibitorWebsiteError" class="error-message hidden">Please enter a valid URL (e.g., https://example.com)</p>
                             </div>
                             
                             <div>
@@ -210,7 +216,10 @@
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Website</label>
-                                <input type="url" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                                <input type="text" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus
+
+:ring-2 focus:ring-green-500 focus:border-transparent">
+                                <p id="visitorWebsiteError" class="error-message hidden">Please enter a valid URL (e.g., https://example.com)</p>
                             </div>
                             
                             <div>
@@ -260,6 +269,20 @@
         </div>
     </div>
 
+    <!-- Error Modal -->
+    <div id="errorModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-8 max-w-md mx-4 text-center">
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-exclamation-triangle text-red-500 text-2xl"></i>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">Registration Failed</h3>
+            <p id="errorMessage" class="text-gray-600 mb-6">An error occurred during registration.</p>
+            <button onclick="closeErrorModal()" class="btn-primary px-6 py-3 text-white font-semibold rounded-lg" style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);">
+                Close
+            </button>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
         <div class="bg-white rounded-2xl p-8 text-center">
@@ -294,16 +317,84 @@
             document.getElementById('registrationForms').scrollIntoView({ behavior: 'smooth' });
         }
 
+        // Normalize URL (e.g., add https:// if missing)
+        function normalizeUrl(url) {
+            if (!url) return url; // Return empty string if URL is empty
+            url = url.trim();
+            if (!url.match(/^https?:\/\//)) {
+                // If no protocol, assume https://
+                url = 'https://' + url;
+            }
+            // Remove trailing slash if present
+            return url.replace(/\/$/, '');
+        }
+
+        // Validate URL format
+        function isValidUrl(url) {
+            if (!url) return true; // Allow empty URLs since website is optional
+            try {
+                new URL(url);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        // Show error modal
+        function showErrorModal(message) {
+            const modal = document.getElementById('errorModal');
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeErrorModal() {
+            const modal = document.getElementById('errorModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
         // Handle exhibitor form submission
         document.getElementById('exhibitorRegistrationForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            await submitRegistration('exhibitor', new FormData(e.target));
+            const form = e.target;
+            const websiteInput = form.querySelector('input[name="website"]');
+            const websiteError = document.getElementById('exhibitorWebsiteError');
+            const websiteValue = websiteInput.value.trim();
+
+            // Validate URL
+            if (websiteValue && !isValidUrl(normalizeUrl(websiteValue))) {
+                websiteError.classList.remove('hidden');
+                websiteInput.classList.add('border-red-500');
+                return;
+            } else {
+                websiteError.classList.add('hidden');
+                websiteInput.classList.remove('border-red-500');
+            }
+
+            await submitRegistration('exhibitor', new FormData(form));
         });
 
         // Handle visitor form submission
         document.getElementById('visitorRegistrationForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            await submitRegistration('visitor', new FormData(e.target));
+            const form = e.target;
+            const websiteInput = form.querySelector('input[name="website"]');
+            const websiteError = document.getElementById('visitorWebsiteError');
+            const websiteValue = websiteInput.value.trim();
+
+            // Validate URL
+            if (websiteValue && !isValidUrl(normalizeUrl(websiteValue))) {
+                websiteError.classList.remove('hidden');
+                websiteInput.classList.add('border-red-500');
+                return;
+            } else {
+                websiteError.classList.add('hidden');
+                websiteInput.classList.remove('border-red-500');
+            }
+
+            await submitRegistration('visitor', new FormData(form));
         });
 
         async function submitRegistration(type, formData) {
@@ -316,6 +407,8 @@
                 for (let [key, value] of formData.entries()) {
                     if (key === 'keyWords' && value) {
                         data[key] = value.split(',').map(k => k.trim()).filter(k => k);
+                    } else if (key === 'website' && value) {
+                        data[key] = normalizeUrl(value);
                     } else {
                         data[key] = value;
                     }
@@ -337,7 +430,7 @@
                     throw new Error(result.message || 'Registration failed');
                 }
             } catch (error) {
-                alert('Registration failed: ' + error.message);
+                showErrorModal('Registration failed: ' + error.message);
             } finally {
                 loadingOverlay.classList.add('hidden');
                 loadingOverlay.classList.remove('flex');

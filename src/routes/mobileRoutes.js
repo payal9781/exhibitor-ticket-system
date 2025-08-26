@@ -20,7 +20,8 @@ const {
   getMySlotStatus,
   getSchedules,
   getAllMeetings,
-  getAllExhibitorsForEvent
+  getAllExhibitorsForEvent,
+  getScans
 } = require('../controllers/mobileController');
 
 // Import sponsor functionality from event controller
@@ -62,4 +63,5 @@ router.post('/confirmed-meetings', authMiddleware(['exhibitor', 'visitor']), get
 router.post('/toggle-slot-visibility', authMiddleware(['exhibitor', 'visitor']), toggleSlotVisibility);
 router.post('/my-slot-status', authMiddleware(['exhibitor', 'visitor']), getMySlotStatus);
 router.post('/get-all-meetings', authMiddleware(['exhibitor', 'visitor']), getAllMeetings);
+router.post('/get-scanuser-eventwise', authMiddleware(['exhibitor', 'visitor']), getScans);
 module.exports = router;

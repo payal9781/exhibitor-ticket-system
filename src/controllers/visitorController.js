@@ -6,18 +6,196 @@ const Organizer = require('../models/Organizer');
 const Exhibitor = require('../models/Exhibitor');
 const UserEventSlot = require('../models/UserEventSlot');
 const Meeting = require('../models/z-index').models.Meeting;
+const generateSlots = require('../utils/slotGenerator');
 
 const createVisitor = asyncHandler(async (req, res) => {
-  const visitor = new Visitor(req.body);
-  const isExists = await Visitor.findOne({ email: visitor.email });
-  if(isExists && isExists?.isActive && !isExists?.isDeleted){
-    return errorResponse(res,'Email already exists');
+  const { eventId, ...visitorData } = req.body;
+  let visitor;
+  let isNewVisitor = false;
+
+  // Check if visitor already exists by phone or email
+  if (visitorData.phone) {
+    visitor = await Visitor.findOne({
+      phone: visitorData.phone,
+      isDeleted: false
+    });
   }
-  if(isExists &&  isExists?.isDeleted){
-    return errorResponse(res,'contact to adminitrator');
+
+  if (!visitor && visitorData.email) {
+    visitor = await Visitor.findOne({
+      email: visitorData.email,
+      isDeleted: false
+    });
   }
+
+  if (visitor) {
+    // Update existing visitor with new data if provided
+    Object.keys(visitorData).forEach(key => {
+      if (visitorData[key] && visitorData[key] !== '' && key !== 'keyWords') {
+        visitor[key] = visitorData[key];
+      }
+    });
+    if (visitorData.keyWords) {
+      visitor.keyWords = visitorData.keyWords;
+    }
+  } else {
+    // Check for deleted visitor with same email
+    if (visitorData.email) {
+      const deletedVisitor = await Visitor.findOne({
+        email: visitorData.email,
+        isDeleted: true
+      });
+      if (deletedVisitor) {
+        return errorResponse(res, 'Contact administrator', 409);
+      }
+    }
+    // Create new visitor
+    visitor = new Visitor({
+      ...visitorData,
+      isActive: true
+    });
+
+    // Create digital card
+    try {
+      const payload = {
+        name: String(visitor.name || '').trim(),
+        email: visitor.email || '',
+        mobile: visitor.phone,
+        businessKeyword: 'Event Visitor',
+        originId: '67ca6934c15747af04fff36c', // Same originId as exhibitor for consistency
+        countryCode: '91'
+      };
+      console.log(payload);
+      const DIGITAL_CARD_URL = 'https://digitalcard.co.in/web/create-account/mobile';
+      const result = await axios.post(DIGITAL_CARD_URL, payload, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (result.data?.data?.path) {
+        visitor.digitalProfile = result.data.data.path;
+      } else {
+        console.log(`Something went wrong while creating digital card: ${JSON.stringify(result.data)}`);
+      }
+    } catch (err) {
+      console.log(`Error in creating digital card: ${err}`);
+    }
+
+    isNewVisitor = true;
+  }
+
+  // Save visitor
   await visitor.save();
-  successResponse(res, visitor, 201);
+
+  // If eventId is provided, add visitor to the event
+  let qrCode = null;
+  let event = null;
+  if (eventId && eventId !== 'none') {
+    event = await Event.findById(eventId);
+    if (!event) {
+      return errorResponse(res, 'Event not found', 404);
+    }
+    if (!event.isActive) {
+      return errorResponse(res, 'Cannot add visitor to inactive event', 400);
+    }
+    if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+      return errorResponse(res, 'Access denied', 403);
+    }
+
+    // Check if registration is allowed (before event endDate)
+    const currentDate = new Date();
+    const eventEndDate = new Date(event.toDate);
+    if (currentDate > eventEndDate) {
+      return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
+    }
+
+    // Check if visitor is already registered
+    const existingVisitor = event.visitor.find(ex => ex.userId.toString() === visitor._id.toString());
+    if (existingVisitor) {
+      return successResponse(res, {
+        message: 'Visitor is already registered for this event',
+        visitor: {
+          _id: visitor._id,
+          name: visitor.name,
+          email: visitor.email,
+          phone: visitor.phone
+        },
+        isNewVisitor,
+        alreadyRegistered: true,
+        qrCode: existingVisitor.qrCode,
+        event: {
+          _id: event._id,
+          title: event.title,
+          fromDate: event.fromDate,
+          toDate: event.toDate
+        }
+      });
+    }
+
+    // Generate QR code
+    const qrData = {
+      eventId: event._id,
+      userId: visitor._id,
+      userType: 'visitor',
+      startDate: event.fromDate,
+      endDate: event.toDate,
+      eventTitle: event.title
+    };
+    qrCode = await require('../utils/qrGenerator')(qrData);
+
+    // Add visitor to event with QR code
+    event.visitor.push({
+      userId: visitor._id,
+      qrCode,
+      registeredAt: new Date()
+    });
+
+    // Generate slots for the visitor
+    try {
+      const existingSlots = await UserEventSlot.findOne({
+        userId: visitor._id,
+        userType: 'visitor',
+        eventId
+      });
+
+      if (!existingSlots) {
+        const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+        const slots = rawSlots.map(s => ({
+          start: s.start,
+          end: s.end,
+          status: 'available',
+          showSlots: false
+        }));
+        const userSlot = new UserEventSlot({
+          userId: visitor._id,
+          userType: 'visitor',
+          eventId,
+          slots
+        });
+        await userSlot.save();
+      }
+    } catch (slotError) {
+      console.error('Error generating slots:', slotError);
+    }
+
+    await event.save();
+  }
+
+  successResponse(res, {
+    message: isNewVisitor ? 'Visitor created successfully' : 'Visitor updated successfully',
+    visitor: {
+      _id: visitor._id,
+      name: visitor.name,
+      email: visitor.email,
+      phone: visitor.phone
+    },
+    isNewVisitor,
+    qrCode,
+    event: event ? {
+      _id: event._id,
+      title: event.title,
+      fromDate: event.fromDate,
+      toDate: event.toDate
+    } : null
+  }, isNewVisitor ? 201 : 200);
 });
 
 const getVisitors = asyncHandler(async (req, res) => {
@@ -157,9 +335,19 @@ const updateVisitor = asyncHandler(async (req, res) => {
 });
 
 const deleteVisitor = asyncHandler(async (req, res) => {
-  const { id } = req.body; // Changed from params to body
+  const { id } = req.body;
   const visitor = await Visitor.findById(id);
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
+
+  // Check if visitor is associated with any active event
+  const eventWithVisitor = await Event.findOne({
+    'visitor.userId': id,
+  });
+
+  if (eventWithVisitor) {
+    return errorResponse(res, 'Cannot delete visitor associated with an active event', 400);
+  }
+
   visitor.isDeleted = true;
   await visitor.save();
   successResponse(res, { message: 'Visitor deleted' });
