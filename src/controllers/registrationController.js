@@ -61,8 +61,8 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   }
 
   const currentDate = new Date();
-  const eventStartDate = new Date(event.fromDate);
-  if (currentDate > eventStartDate) {
+  const eventToDate = new Date(event.toDate);
+  if (currentDate > eventToDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
 
@@ -223,8 +223,8 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
 
   // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
-  const eventStartDate = new Date(event.fromDate);
-  if (currentDate > eventStartDate) {
+  const eventToDate = new Date(event.toDate);
+  if (currentDate > eventToDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
 
