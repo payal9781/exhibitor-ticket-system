@@ -1,32 +1,37 @@
 const moment = require('moment'); // Assume installed
-const generateSlots = (fromDate, toDate, startTime, endTime) => {
+const generateSlots = (fromDate, toDate, meetingStartTime, meetingEndTime, timeInterval) => {
   const slots = [];
-  let currentDate = moment(fromDate);
-  const eventEndDate = moment(toDate);
-  
-  while (currentDate.isSameOrBefore(eventEndDate)) {
-    // Parse time strings (HH:MM:SS format) and combine with current date
-    const [startHour, startMinute, startSecond = 0] = startTime.split(':').map(Number);
-    const [endHour, endMinute, endSecond = 0] = endTime.split(':').map(Number);
-    
-    let currentTime = moment(currentDate)
-      .hour(startHour)
-      .minute(startMinute)
-      .second(startSecond);
-      
-    const dayEndTime = moment(currentDate)
-      .hour(endHour)
-      .minute(endMinute)
-      .second(endSecond);
-    
-    while (currentTime.isBefore(dayEndTime)) {
-      const slotEnd = moment(currentTime).add(30, 'minutes');
-      if (slotEnd.isAfter(dayEndTime)) break;
-      slots.push({ start: currentTime.toDate(), end: slotEnd.toDate() });
+  const startDate = new Date(fromDate);
+  const endDate = new Date(toDate);
+
+  // Default to event startTime/endTime if meeting times are not provided
+  const startTime = meetingStartTime || '09:00:00';
+  const endTime = meetingEndTime || '17:00:00';
+  const interval = timeInterval || 30; // Default to 30 minutes
+
+  // Iterate through each day from fromDate to toDate
+  let currentDate = new Date(startDate);
+  while (currentDate <= endDate) {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    let currentTime = new Date(`${dateStr}T${startTime}`);
+    const endTimeDate = new Date(`${dateStr}T${endTime}`);
+
+    // Generate slots for the day
+    while (currentTime < endTimeDate) {
+      const slotEnd = new Date(currentTime.getTime() + interval * 60 * 1000);
+      if (slotEnd <= endTimeDate) {
+        slots.push({
+          start: new Date(currentTime),
+          end: slotEnd
+        });
+      }
       currentTime = slotEnd;
     }
-    currentDate.add(1, 'day');
+
+    // Move to next day
+    currentDate.setDate(currentDate.getDate() + 1);
   }
+
   return slots;
 };
 module.exports = generateSlots;

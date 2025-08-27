@@ -14,6 +14,9 @@ const eventSchema = new mongoose.Schema({
   endTime: { type: String, required: true }, // Format: "HH:MM:SS"
   location: { type: String, required: true },
   media: [{ type: String }],
+    meetingStartTime: String, // e.g., "14:00:00"
+  meetingEndTime: String, // e.g., "16:00:00"
+  timeInterval: Number, // in minutes, e.g., 15
   registrationLink: { type: String, unique: true },
   isDeleted: { type: Boolean, default: false },
   isActive: { type: Boolean, default: true },

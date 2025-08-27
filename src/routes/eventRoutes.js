@@ -30,15 +30,16 @@ const {
   removeSponsor,
   getSponsors
 } = require('../controllers/eventController');
-const uploadMiddleware = require('../middleware/uploadMiddleware');
-
-router.post('/create', authMiddleware(['organizer', 'superAdmin']), uploadMiddleware('media'), createEvent);
+// const uploadMiddleware = require('../middleware/uploadMiddleware');
+const constants = require('../config/constants');
+const upload = require('../config/multerConfig').upload;
+router.post('/create', authMiddleware(['organizer', 'superAdmin']),upload(constants.EVENT_BANNER_PATH).fields([{ name: 'banners', maxCount: 10 }]), createEvent);
 router.post('/add-schedule', authMiddleware(['organizer', 'superAdmin']), addOrUpdateSchedule);
 router.post('/get-schedules', authMiddleware(['organizer', 'superAdmin']), getSchedules);
 router.post('/delete-schedule', authMiddleware(['organizer', 'superAdmin']), deleteSchedule);
 router.post('/list', authMiddleware(['organizer', 'superAdmin', 'exhibitor', 'visitor']), getEvents);
 router.post('/get', authMiddleware(['organizer', 'superAdmin', 'exhibitor', 'visitor']), getEventById);
-router.post('/update', authMiddleware(['organizer', 'superAdmin']), updateEvent);
+router.post('/update', authMiddleware(['organizer', 'superAdmin']),upload(constants.EVENT_BANNER_PATH).fields([{ name: 'banners', maxCount: 10 }]), updateEvent);
 router.post('/delete', authMiddleware(['organizer', 'superAdmin']), deleteEvent);
 router.post('/register', authMiddleware(['exhibitor', 'visitor', 'organizer', 'superAdmin']), registerForEvent);
 router.post('/registration/event/:registrationLink/:type', registerByLink);

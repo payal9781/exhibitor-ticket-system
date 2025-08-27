@@ -14,6 +14,7 @@ const mongoose = require('mongoose');
 const createEvent = asyncHandler(async (req, res) => {
   const { schedules, ...eventData } = req.body;
 
+  // Validate schedules
   if (schedules) {
     for (const schedule of schedules) {
       if (!schedule.activities || !Array.isArray(schedule.activities)) {
@@ -39,10 +40,24 @@ const createEvent = asyncHandler(async (req, res) => {
     }
   }
 
+  // Handle banner uploads
+  let mediaUrls = [];
+  if (req.files && req.files.banners) {
+    const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
+    mediaUrls = banners.map(file => {
+      const fileName = `${uuidv4()}${path.extname(file.originalname)}`;
+      const filePath = path.join('uploads', 'banners', fileName);
+      // In a real implementation, save the file to the server or cloud storage
+      // For simplicity, assume the file is saved and return a URL
+      return `/uploads/banners/${fileName}`;
+    });
+  }
+
   const event = new Event({ 
     ...eventData, 
     organizerId: req.user.id,
-    schedules 
+    schedules,
+    media: mediaUrls
   });
   await event.save();
   successResponse(res, event, 201);
@@ -260,6 +275,7 @@ const updateEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Cannot update event dates when exhibitors or visitors are associated', 400);
   }
 
+  // Validate schedules
   if (schedules) {
     for (const schedule of schedules) {
       if (!schedule.activities || !Array.isArray(schedule.activities)) {
@@ -286,6 +302,19 @@ const updateEvent = asyncHandler(async (req, res) => {
       }
     }
     event.schedules = schedules;
+  }
+
+  // Handle banner uploads
+  if (req.files && req.files.banners) {
+    const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
+    const mediaUrls = banners.map(file => {
+      const fileName = `${uuidv4()}${path.extname(file.originalname)}`;
+      const filePath = path.join('uploads', 'banners', fileName);
+      // In a real implementation, save the file to the server or cloud storage
+      // For simplicity, assume the file is saved and return a URL
+      return `/uploads/banners/${fileName}`;
+    });
+    event.media = mediaUrls; // Replace existing media with new uploads
   }
 
   // Update other fields

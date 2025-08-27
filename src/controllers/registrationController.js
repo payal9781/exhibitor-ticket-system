@@ -51,7 +51,6 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   const { registrationLink } = req.params;
   const exhibitorData = req.body;
 
-  // Find event by registration link
   const event = await Event.findOne({
     registrationLink,
     isDeleted: false
@@ -61,10 +60,8 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
 
-  // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
   const eventStartDate = new Date(event.fromDate);
-
   if (currentDate > eventStartDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
@@ -72,7 +69,6 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   let exhibitor;
   let isNewExhibitor = false;
 
-  // Check if exhibitor already exists by phone or email
   if (exhibitorData.phone) {
     exhibitor = await Exhibitor.findOne({
       phone: exhibitorData.phone,
@@ -88,7 +84,6 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   }
 
   if (exhibitor) {
-    // Update existing exhibitor with new data if provided
     Object.keys(exhibitorData).forEach(key => {
       if (exhibitorData[key] && exhibitorData[key] !== '') {
         exhibitor[key] = exhibitorData[key];
@@ -96,14 +91,11 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     });
     await exhibitor.save();
   } else {
-    // Create new exhibitor
     exhibitor = new Exhibitor({
       ...exhibitorData,
       isActive: true
     });
 
-
-    let digitalCardLink = "";
     try {
       const payload = {
         name: String(exhibitor.companyName).trim(),
@@ -113,15 +105,15 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
         originId: "67ca6934c15747af04fff36c",
         countryCode: "91"
       };
-      console.log(payload);
       const DIGITAL_CARD_URL = "https://digitalcard.co.in/web/create-account/mobile";
-      var result = await axios.post(DIGITAL_CARD_URL, payload, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      const result = await axios.post(DIGITAL_CARD_URL, payload, {
+        headers: { 'Content-Type': 'application/json' }
       });
-      if (result.data != null && result.data.data!=null) { exhibitor.digitalProfile = result.data.data.path; }
-      else { console.log(`Something went wrong while creating digital card: ${result.data}`); }
+      if (result.data?.data?.path) {
+        exhibitor.digitalProfile = result.data.data.path;
+      } else {
+        console.log(`Something went wrong while creating digital card: ${JSON.stringify(result.data)}`);
+      }
     } catch (err) {
       console.log(`Error in creating digital card: ${err}`);
     }
@@ -130,7 +122,6 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     isNewExhibitor = true;
   }
 
-  // Check if exhibitor is already registered for this event
   const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
   if (existingExhibitor) {
     return successResponse(res, {
@@ -147,7 +138,6 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     });
   }
 
-  // Generate QR code
   const qrData = {
     eventId: event._id,
     userId: exhibitor._id,
@@ -158,27 +148,45 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   };
   const qrCode = await require('../utils/qrGenerator')(qrData);
 
-  // Add exhibitor to event with QR code
   event.exhibitor.push({
     userId: exhibitor._id,
     qrCode,
     registeredAt: new Date()
   });
+
+  try {
+    const existingSlots = await UserEventSlot.findOne({
+      userId: exhibitor._id,
+      userType: 'exhibitor',
+      eventId: event._id
+    });
+
+    if (!existingSlots) {
+      const rawSlots = generateSlots(
+        event.fromDate,
+        event.toDate,
+        event.meetingStartTime || event.startTime,
+        event.meetingEndTime || event.endTime,
+        event.timeInterval || 30
+      );
+      const slots = rawSlots.map(s => ({
+        start: s.start,
+        end: s.end,
+        status: 'available'
+      }));
+      const userSlot = new UserEventSlot({
+        userId: exhibitor._id,
+        userType: 'exhibitor',
+        eventId: event._id,
+        slots
+      });
+      await userSlot.save();
+    }
+  } catch (slotError) {
+    console.error('Error generating slots:', slotError);
+  }
+
   await event.save();
-
-  // Generate slots for the exhibitor
-  const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-  const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
-
-  const userSlot = new UserEventSlot({
-    userId: exhibitor._id,
-    userType: 'exhibitor',
-    eventId: event._id,
-    slots
-  });
-  await userSlot.save();
-
-
 
   successResponse(res, {
     message: 'Exhibitor registered successfully for the event',
@@ -198,7 +206,6 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     }
   });
 });
-
 // Register visitor for event
 const registerVisitorForEvent = asyncHandler(async (req, res) => {
   const { registrationLink } = req.params;
@@ -217,7 +224,6 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
   const eventStartDate = new Date(event.fromDate);
-
   if (currentDate > eventStartDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
@@ -243,12 +249,24 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   if (visitor) {
     // Update existing visitor with new data if provided
     Object.keys(visitorData).forEach(key => {
-      if (visitorData[key] && visitorData[key] !== '') {
+      if (visitorData[key] && visitorData[key] !== '' && key !== 'keyWords') {
         visitor[key] = visitorData[key];
       }
     });
-    await visitor.save();
+    if (visitorData.keyWords) {
+      visitor.keyWords = visitorData.keyWords;
+    }
   } else {
+    // Check for deleted visitor with same email
+    if (visitorData.email) {
+      const deletedVisitor = await Visitor.findOne({
+        email: visitorData.email,
+        isDeleted: true
+      });
+      if (deletedVisitor) {
+        return errorResponse(res, 'Contact administrator', 409);
+      }
+    }
     // Create new visitor
     visitor = new Visitor({
       ...visitorData,
@@ -257,28 +275,31 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
 
     try {
       const payload = {
-        name: String(visitor.name).trim(),
-        email: visitor.email,
+        name: String(visitor.name || '').trim(),
+        email: visitor.email || '',
         mobile: visitor.phone,
-        businessKeyword: "Event Visitor",
-        originId: "67ca6934c15747af04fff36c",
-        countryCode: "91"
+        businessKeyword: 'Event Visitor',
+        originId: '67ca6934c15747af04fff36c',
+        countryCode: '91'
       };
-      const DIGITAL_CARD_URL = "https://digitalcard.co.in/web/create-account/mobile";
-      var result = await axios.post(DIGITAL_CARD_URL, payload, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      const DIGITAL_CARD_URL = 'https://digitalcard.co.in/web/create-account/mobile';
+      const result = await axios.post(DIGITAL_CARD_URL, payload, {
+        headers: { 'Content-Type': 'application/json' }
       });
-      if (result.data != null && result.data.data!=null) { visitor.digitalProfile = result.data.data.path; }
-      else { console.log(`Something went wrong while creating digital card: ${result.data}`); }
+      if (result.data?.data?.path) {
+        visitor.digitalProfile = result.data.data.path;
+      } else {
+        console.log(`Something went wrong while creating digital card: ${JSON.stringify(result.data)}`);
+      }
     } catch (err) {
       console.log(`Error in creating digital card: ${err}`);
     }
 
-    await visitor.save();
     isNewVisitor = true;
   }
+
+  // Save visitor
+  await visitor.save();
 
   // Check if visitor is already registered for this event
   const existingVisitor = event.visitor.find(vis => vis.userId.toString() === visitor._id.toString());
@@ -291,9 +312,15 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
         email: visitor.email,
         phone: visitor.phone
       },
-      isNewVisitor: false,
+      isNewVisitor,
       alreadyRegistered: true,
-      qrCode: existingVisitor.qrCode
+      qrCode: existingVisitor.qrCode,
+      event: {
+        _id: event._id,
+        title: event.title,
+        fromDate: event.fromDate,
+        toDate: event.toDate
+      }
     });
   }
 
@@ -314,21 +341,42 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     qrCode,
     registeredAt: new Date()
   });
-  await event.save();
 
   // Generate slots for the visitor
-  const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-  const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
+  try {
+    const existingSlots = await UserEventSlot.findOne({
+      userId: visitor._id,
+      userType: 'visitor',
+      eventId: event._id
+    });
 
-  const userSlot = new UserEventSlot({
-    userId: visitor._id,
-    userType: 'visitor',
-    eventId: event._id,
-    slots
-  });
-  await userSlot.save();
+    if (!existingSlots) {
+      const rawSlots = generateSlots(
+        event.fromDate,
+        event.toDate,
+        event.meetingStartTime || event.startTime,
+        event.meetingEndTime || event.endTime,
+        event.timeInterval || 30
+      );
+      const slots = rawSlots.map(s => ({
+        start: s.start,
+        end: s.end,
+        status: 'available',
+        showSlots: false
+      }));
+      const userSlot = new UserEventSlot({
+        userId: visitor._id,
+        userType: 'visitor',
+        eventId: event._id,
+        slots
+      });
+      await userSlot.save();
+    }
+  } catch (slotError) {
+    console.error('Error generating slots:', slotError);
+  }
 
-
+  await event.save();
 
   successResponse(res, {
     message: 'Visitor registered successfully for the event',

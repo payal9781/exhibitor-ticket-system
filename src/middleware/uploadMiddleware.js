@@ -1,3 +1,3 @@
-const upload = require('../config/multerConfig');
-const uploadMiddleware = (fieldName) => upload.single(fieldName);
+const upload = require('../config/multerConfig').upload;
+const uploadMiddleware = (fieldName) => upload('uploads').single(fieldName);
 module.exports = uploadMiddleware;

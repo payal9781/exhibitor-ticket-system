@@ -30,7 +30,6 @@ const createExhibitor = asyncHandler(async (req, res) => {
   }
 
   if (exhibitor) {
-    // Update existing exhibitor with new data if provided
     Object.keys(exhibitorData).forEach(key => {
       if (exhibitorData[key] && exhibitorData[key] !== '' && key !== 'keyWords') {
         exhibitor[key] = exhibitorData[key];
@@ -40,7 +39,6 @@ const createExhibitor = asyncHandler(async (req, res) => {
       exhibitor.keyWords = exhibitorData.keyWords;
     }
   } else {
-    // Check for deleted exhibitor with same email
     if (exhibitorData.email) {
       const deletedExhibitor = await Exhibitor.findOne({
         email: exhibitorData.email,
@@ -50,13 +48,11 @@ const createExhibitor = asyncHandler(async (req, res) => {
         return errorResponse(res, 'Contact administrator', 409);
       }
     }
-    // Create new exhibitor
     exhibitor = new Exhibitor({
       ...exhibitorData,
       isActive: true
     });
 
-    // Create digital card
     try {
       const payload = {
         name: String(exhibitor.companyName || '').trim(),
@@ -66,7 +62,6 @@ const createExhibitor = asyncHandler(async (req, res) => {
         originId: '67ca6934c15747af04fff36c',
         countryCode: '91'
       };
-      console.log(payload);
       const DIGITAL_CARD_URL = 'https://digitalcard.co.in/web/create-account/mobile';
       const result = await axios.post(DIGITAL_CARD_URL, payload, {
         headers: { 'Content-Type': 'application/json' }
@@ -83,10 +78,8 @@ const createExhibitor = asyncHandler(async (req, res) => {
     isNewExhibitor = true;
   }
 
-  // Save exhibitor
   await exhibitor.save();
 
-  // If eventId is provided, add exhibitor to the event
   let qrCode = null;
   let event = null;
   if (eventId && eventId !== 'none') {
@@ -101,14 +94,12 @@ const createExhibitor = asyncHandler(async (req, res) => {
       return errorResponse(res, 'Access denied', 403);
     }
 
-    // Check if registration is allowed (before event endDate)
     const currentDate = new Date();
     const eventEndDate = new Date(event.toDate);
     if (currentDate > eventEndDate) {
       return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
     }
 
-    // Check if exhibitor is already registered
     const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
     if (existingExhibitor) {
       return successResponse(res, {
@@ -131,7 +122,6 @@ const createExhibitor = asyncHandler(async (req, res) => {
       });
     }
 
-    // Generate QR code
     const qrData = {
       eventId: event._id,
       userId: exhibitor._id,
@@ -142,14 +132,12 @@ const createExhibitor = asyncHandler(async (req, res) => {
     };
     qrCode = await require('../utils/qrGenerator')(qrData);
 
-    // Add exhibitor to event with QR code
     event.exhibitor.push({
       userId: exhibitor._id,
       qrCode,
       registeredAt: new Date()
     });
 
-    // Generate slots for the exhibitor
     try {
       const existingSlots = await UserEventSlot.findOne({
         userId: exhibitor._id,
@@ -158,7 +146,13 @@ const createExhibitor = asyncHandler(async (req, res) => {
       });
 
       if (!existingSlots) {
-        const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+        const rawSlots = generateSlots(
+          event.fromDate,
+          event.toDate,
+          event.meetingStartTime || event.startTime,
+          event.meetingEndTime || event.endTime,
+          event.timeInterval || 30
+        );
         const slots = rawSlots.map(s => ({
           start: s.start,
           end: s.end,
