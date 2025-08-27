@@ -325,14 +325,15 @@ const recordScan = asyncHandler(async (req, res) => {
   const scannerId = req.user.id;
   const scannerType = req.user.type;
 
+  // Validate required fields
   if (!scannedUserId || !scannedUserType || !eventId) {
-    return successResponse(res, { message: 'Scanned user ID, user type, and event ID are required', data: 0 });
+    return successResponse(res, { message: 'Scanned user ID, user type, and event ID are required', data: 0 }, 400);
   }
 
   // Validate event exists
   const event = await Event.findById(eventId);
   if (!event) {
-    return successResponse(res, { message: 'Event not found', data: 0 });
+    return successResponse(res, { message: 'Event not found', data: 0 }, 404);
   }
 
   // Validate scanned user exists
@@ -341,46 +342,78 @@ const recordScan = asyncHandler(async (req, res) => {
     scannedUser = await Exhibitor.findById(scannedUserId);
   } else if (scannedUserType === 'visitor') {
     scannedUser = await Visitor.findById(scannedUserId);
+  } else {
+    return successResponse(res, { message: 'Invalid scanned user type', data: 0 }, 400);
   }
 
   if (!scannedUser) {
-    return successResponse(res, { message: 'Scanned user not found', data: 0 });
+    return successResponse(res, { message: 'Scanned user not found', data: 0 }, 404);
   }
 
-  // Check if scan record already exists for this scanner and event
-  let scanRecord = await Scan.findOne({
-    scanner: scannerId,
-    userModel: scannerType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
-    eventId
-  });
-
-  if (scanRecord) {
-    // Add scanned user if not already in the array
-    if (!scanRecord.scannedUser.includes(scannedUserId)) {
-      scanRecord.scannedUser.push(scannedUserId);
-      await scanRecord.save();
-    }
-  } else {
-    // Create new scan record
-    scanRecord = new Scan({
+  try {
+    // Record for scanner (scannerId scanning scannedUserId)
+    let scannerRecord = await Scan.findOne({
       scanner: scannerId,
       userModel: scannerType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
-      scannedUser: [scannedUserId],
       eventId
     });
-    await scanRecord.save();
-  }
 
-  successResponse(res, {
-    message: 'Scan recorded successfully',
-    data: {
-      scannedUser: {
-        id: scannedUser._id,
-        name: scannedUser.name || scannedUser.companyName,
-        type: scannedUserType
+    if (scannerRecord) {
+      // Add scannedUserId if not already present
+      if (!scannerRecord.scannedUser.includes(scannedUserId)) {
+        scannerRecord.scannedUser.push(scannedUserId);
+        await scannerRecord.save();
       }
+    } else {
+      // Create new scan record for scanner
+      scannerRecord = new Scan({
+        scanner: scannerId,
+        userModel: scannerType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+        scannedUser: [scannedUserId],
+        eventId
+      });
+      await scannerRecord.save();
     }
-  });
+
+    // Record for scanned user (scannedUserId being scanned by scannerId)
+    let scannedUserRecord = await Scan.findOne({
+      scanner: scannedUserId,
+      userModel: scannedUserType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+      eventId
+    });
+
+    if (scannedUserRecord) {
+      // Add scannerId if not already present
+      if (!scannedUserRecord.scannedUser.includes(scannerId)) {
+        scannedUserRecord.scannedUser.push(scannerId);
+        await scannedUserRecord.save();
+      }
+    } else {
+      // Create new scan record for scanned user
+      scannedUserRecord = new Scan({
+        scanner: scannedUserId,
+        userModel: scannedUserType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+        scannedUser: [scannerId],
+        eventId
+      });
+      await scannedUserRecord.save();
+    }
+
+    // Respond with scanned user details
+    successResponse(res, {
+      message: 'Scan recorded successfully',
+      data: {
+        scannedUser: {
+          id: scannedUser._id,
+          name: scannedUser.name || scannedUser.companyName,
+          type: scannedUserType
+        }
+      }
+    }, 201);
+
+  } catch (error) {
+    return successResponse(res, { message: 'Failed to record scan', data: 0 }, 500);
+  }
 });
 
 // Get scan statistics for mobile dashboard

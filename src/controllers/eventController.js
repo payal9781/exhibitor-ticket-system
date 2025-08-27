@@ -761,9 +761,18 @@ const getEventParticipants = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event ID is required', 400);
   }
 
+  // Fetch event with populated exhibitor and visitor data
   const event = await Event.findById(eventId)
-    .populate('exhibitor.userId', 'companyName email phone profileImage bio Sector location isActive isDeleted')
-    .populate('visitor.userId', 'name email phone profileImage bio Sector location companyName isActive isDeleted');
+    .populate({
+      path: 'exhibitor.userId',
+      select: 'companyName email phone profileImage bio Sector location isActive isDeleted',
+      match: { isActive: true, isDeleted: { $ne: true } } // Only include active, non-deleted users
+    })
+    .populate({
+      path: 'visitor.userId',
+      select: 'name email phone profileImage bio Sector location companyName isActive isDeleted',
+      match: { isActive: true, isDeleted: { $ne: true } }
+    });
 
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
@@ -773,19 +782,39 @@ const getEventParticipants = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Access denied', 403);
   }
 
-  const exhibitors = event.exhibitor.map(ex => ({
-    ...ex.userId,
-    qrCode: ex.qrCode,
-    registeredAt: ex.registeredAt,
-    userType: 'exhibitor'
-  }));
+  // Ensure exhibitors and visitors are arrays and filter out null userId entries
+  const exhibitors = (event.exhibitor || [])
+    .filter(ex => ex.userId) // Exclude entries with null userId
+    .map(ex => ({
+      _id: ex.userId._id.toString(),
+      companyName: ex.userId.companyName,
+      email: ex.userId.email,
+      phone: ex.userId.phone,
+      profileImage: ex.userId.profileImage,
+      bio: ex.userId.bio,
+      Sector: ex.userId.Sector,
+      location: ex.userId.location,
+      registeredAt: ex.registeredAt,
+      qrCode: ex.qrCode,
+      userType: 'exhibitor'
+    }));
 
-  const visitors = event.visitor.map(vis => ({
-    ...vis.userId,
-    qrCode: vis.qrCode,
-    registeredAt: vis.registeredAt,
-    userType: 'visitor'
-  }));
+  const visitors = (event.visitor || [])
+    .filter(vis => vis.userId) // Exclude entries with null userId
+    .map(vis => ({
+      _id: vis.userId._id.toString(),
+      name: vis.userId.name,
+      companyName: vis.userId.companyName,
+      email: vis.userId.email,
+      phone: vis.userId.phone,
+      profileImage: vis.userId.profileImage,
+      bio: vis.userId.bio,
+      Sector: vis.userId.Sector,
+      location: vis.userId.location,
+      registeredAt: vis.registeredAt,
+      qrCode: vis.qrCode,
+      userType: 'visitor'
+    }));
 
   successResponse(res, {
     eventId,
