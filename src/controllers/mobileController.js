@@ -1108,15 +1108,15 @@ const getAllUsersForEvent = asyncHandler(async (req, res) => {
   const model = userType === 'exhibitor' ? Exhibitor : Visitor;
 
   // Find scan records where the current user is the scanner and eventId matches
-  // const scanRecords = await Scan.find({
-  //   scanner: userId,
-  //   eventId,
-  // }).select('scannedUser');
+  const scanRecords = await Scan.find({
+    scanner: userId,
+    eventId,
+  }).select('scannedUser');
 
-  // // Extract scanned user IDs as ObjectIds
-  // const scannedUserIds = scanRecords.flatMap(record =>
-  //   record.scannedUser.map(id => new mongoose.Types.ObjectId(id))
-  // );
+  // Extract scanned user IDs as ObjectIds
+  const scannedUserIds = scanRecords.flatMap(record =>
+    record.scannedUser.map(id => new mongoose.Types.ObjectId(id))
+  );
 
   // Aggregate to fetch users from the appropriate array and collection
   const users = await Event.aggregate([
@@ -1151,15 +1151,15 @@ const getAllUsersForEvent = asyncHandler(async (req, res) => {
     {
       $project: {
         user: `$${arrayField}.userId`,
-        // scanned: {
-        //   $cond: {
-        //     if: {
-        //       $in: [`$${arrayField}.userId._id`, scannedUserIds],
-        //     },
-        //     then: true,
-        //     else: false,
-        //   },
-        // },
+        scanned: {
+          $cond: {
+            if: {
+              $in: [`$${arrayField}.userId._id`, scannedUserIds],
+            },
+            then: true,
+            else: false,
+          },
+        },
       },
     },
     {
