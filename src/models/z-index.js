@@ -10,6 +10,7 @@ const models = {
   Visitor: require('./Visitor'),
   Meeting: require('./meeting'),
   ScannedCards: require('./ScannedCards'),
+  Leads : require('./leads'),
 };
 
 module.exports = { models };

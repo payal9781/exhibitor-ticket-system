@@ -1084,86 +1084,103 @@ const getSchedules = asyncHandler(async (req, res) => {
 });
 
 
-const getAllExhibitorsForEvent = asyncHandler(async (req, res) => {
-  const { eventId } = req.body;
+const getAllUsersForEvent = asyncHandler(async (req, res) => {
+  const { eventId ,userType} = req.body;
   const userId = req.user.id;
 
   if (!eventId) {
     return errorResponse(res, 'Event ID is required', 400);
   }
 
+  if (!mongoose.Types.ObjectId.isValid(eventId)) {
+    return errorResponse(res, 'Invalid event ID', 400);
+  }
+
+  // Check if event exists and is active
+  const event = await Event.findOne({ _id: eventId, isActive: true, isDeleted: false });
+  if (!event) {
+    return errorResponse(res, 'Event not found or inactive', 404);
+  }
+
+  // Determine collection and array based on userType
+  const collectionName = userType === 'exhibitor' ? 'exhibitors' : 'visitors';
+  const arrayField = userType === 'exhibitor' ? 'exhibitor' : 'visitor';
+  const model = userType === 'exhibitor' ? Exhibitor : Visitor;
+
   // Find scan records where the current user is the scanner and eventId matches
   const scanRecords = await Scan.find({
     scanner: userId,
-    eventId: eventId
+    eventId,
   }).select('scannedUser');
 
-  // Extract scanned user IDs as strings
+  // Extract scanned user IDs as ObjectIds
   const scannedUserIds = scanRecords.flatMap(record =>
     record.scannedUser.map(id => new mongoose.Types.ObjectId(id))
   );
 
-  const exhibitors = await Event.aggregate([
+  // Aggregate to fetch users from the appropriate array and collection
+  const users = await Event.aggregate([
     {
       $match: {
-        _id: new mongoose.Types.ObjectId(eventId)
-      }
+        _id: new mongoose.Types.ObjectId(eventId),
+      },
     },
     {
       $project: {
-        exhibitor: 1
-      }
+        [arrayField]: 1,
+      },
     },
     {
       $unwind: {
-        path: '$exhibitor'
-      }
+        path: `$${arrayField}`,
+      },
     },
     {
       $lookup: {
-        from: 'exhibitors',
-        localField: 'exhibitor.userId',
+        from: collectionName,
+        localField: `${arrayField}.userId`,
         foreignField: '_id',
-        as: 'exhibitor.userId'
-      }
+        as: `${arrayField}.userId`,
+      },
     },
     {
       $unwind: {
-        path: '$exhibitor.userId'
-      }
+        path: `$${arrayField}.userId`,
+      },
     },
     {
       $project: {
-        exhibitor: '$exhibitor.userId',
+        user: `$${arrayField}.userId`,
         scanned: {
           $cond: {
             if: {
-              $in: ['$exhibitor.userId._id', scannedUserIds]
+              $in: [`$${arrayField}.userId._id`, scannedUserIds],
             },
             then: true,
-            else: false
-          }
-        }
-      }
+            else: false,
+          },
+        },
+      },
     },
     {
       $project: {
-        _id: '$exhibitor._id',
-        companyName: '$exhibitor.companyName',
-        email: '$exhibitor.email',
-        phone: '$exhibitor.phone',
-        profileImage: '$exhibitor.profileImage',
-        bio: '$exhibitor.bio',
-        Sector: '$exhibitor.Sector',
-        location: '$exhibitor.location',
-        scanned: 1
-      }
-    }
+        _id: '$user._id',
+        companyName: '$user.companyName',
+        email: '$user.email',
+        phone: '$user.phone',
+        profileImage: '$user.profileImage',
+        bio: '$user.bio',
+        Sector: '$user.Sector',
+        location: '$user.location',
+        scanned: 1,
+        userType: { $literal: userType },
+      },
+    },
   ]).exec();
 
   successResponse(res, {
-    message: 'All exhibitors retrieved',
-    exhibitors: exhibitors || []
+    message: `All ${userType}s retrieved`,
+    users: users || [],
   });
 });
 
@@ -1341,7 +1358,7 @@ module.exports = {
   toggleSlotVisibility,
   getMySlotStatus,
   getSchedules,
-  getAllExhibitorsForEvent,
+  getAllUsersForEvent,
   getAllMeetings,
   getScans
 };

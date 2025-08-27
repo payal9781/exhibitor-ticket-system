@@ -10,13 +10,19 @@ const QRCode = require('qrcode');
 const crypto = require('crypto');
 const moment = require('moment');
 const mongoose = require('mongoose');
+const path = require('path');
+const fs = require('fs/promises');
+const {v4:uuidv4} = require('uuid');
+const uploadDir = path.join(__dirname, '..', 'uploads', 'banners');
+fs.mkdir(uploadDir, { recursive: true }).catch(err => console.error('Failed to create upload directory:', err));
 
 const createEvent = asyncHandler(async (req, res) => {
   const { schedules, ...eventData } = req.body;
 
   // Validate schedules
   if (schedules) {
-    for (const schedule of schedules) {
+    const parsedSchedules = typeof schedules === 'string' ? JSON.parse(schedules) : schedules;
+    for (const schedule of parsedSchedules) {
       if (!schedule.activities || !Array.isArray(schedule.activities)) {
         return errorResponse(res, 'Each schedule must have an activities array', 400);
       }
@@ -38,25 +44,22 @@ const createEvent = asyncHandler(async (req, res) => {
         }
       }
     }
+    eventData.schedules = parsedSchedules;
   }
 
   // Handle banner uploads
   let mediaUrls = [];
   if (req.files && req.files.banners) {
     const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
-    mediaUrls = banners.map(file => {
-      const fileName = `${uuidv4()}${path.extname(file.originalname)}`;
-      const filePath = path.join('uploads', 'banners', fileName);
-      // In a real implementation, save the file to the server or cloud storage
-      // For simplicity, assume the file is saved and return a URL
-      return `/uploads/banners/${fileName}`;
-    });
+    for (const file of banners) {
+      const fileUrl = file?.path || '';
+      mediaUrls.push(fileUrl);
+    }
   }
 
   const event = new Event({ 
     ...eventData, 
     organizerId: req.user.id,
-    schedules,
     media: mediaUrls
   });
   await event.save();
@@ -277,7 +280,8 @@ const updateEvent = asyncHandler(async (req, res) => {
 
   // Validate schedules
   if (schedules) {
-    for (const schedule of schedules) {
+    const parsedSchedules = typeof schedules === 'string' ? JSON.parse(schedules) : schedules;
+    for (const schedule of parsedSchedules) {
       if (!schedule.activities || !Array.isArray(schedule.activities)) {
         return errorResponse(res, 'Each schedule must have an activities array', 400);
       }
@@ -301,19 +305,20 @@ const updateEvent = asyncHandler(async (req, res) => {
         }
       }
     }
-    event.schedules = schedules;
+    event.schedules = parsedSchedules;
   }
 
   // Handle banner uploads
   if (req.files && req.files.banners) {
     const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
-    const mediaUrls = banners.map(file => {
-      const fileName = `${uuidv4()}${path.extname(file.originalname)}`;
-      const filePath = path.join('uploads', 'banners', fileName);
-      // In a real implementation, save the file to the server or cloud storage
-      // For simplicity, assume the file is saved and return a URL
-      return `/uploads/banners/${fileName}`;
-    });
+    const mediaUrls = [];
+    for (const file of banners) {
+      const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
+    for (const file of banners) {
+      const fileUrl = file?.path || '';
+      mediaUrls.push(fileUrl);
+    }
+    }
     event.media = mediaUrls; // Replace existing media with new uploads
   }
 
@@ -325,7 +330,6 @@ const updateEvent = asyncHandler(async (req, res) => {
   await event.save();
   successResponse(res, event);
 });
-
 const deleteEvent = asyncHandler(async (req, res) => {
   const { id } = req.body;
   const event = await Event.findById(id);
@@ -1450,7 +1454,8 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
       recentScans: todayAttendance.slice(0, 10).map(attendance => ({
         user: {
           name: attendance.userId.name || attendance.userId.companyName,
-          type: attendance.userModel.toLowerCase()
+          type: attendance.userModel.toLowerCase(),
+          phone: attendance.userId.phone
         },
         event: {
           title: attendance.eventId.title,

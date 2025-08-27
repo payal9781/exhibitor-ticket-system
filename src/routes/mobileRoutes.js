@@ -20,10 +20,14 @@ const {
   getMySlotStatus,
   getSchedules,
   getAllMeetings,
-  getAllExhibitorsForEvent,
+  getAllUsersForEvent,
   getScans
 } = require('../controllers/mobileController');
 
+const { createLead,
+    getLeads,
+    updateLead,
+    deleteLead } = require('../controllers/leadController');
 // Import sponsor functionality from event controller
 const { getSponsors } = require('../controllers/eventController');
 
@@ -48,7 +52,7 @@ router.post('/my-profile', authMiddleware(['exhibitor', 'visitor']), getMyProfil
 router.post('/update-profile', authMiddleware(['exhibitor', 'visitor']), updateMyProfile);
 
 router.post('/get-schedules', authMiddleware(['exhibitor', 'visitor']), getSchedules);
-router.post('/get-all-exhibitors-for-event', authMiddleware(['exhibitor', 'visitor']), getAllExhibitorsForEvent);
+router.post('/get-all-exhibitors-for-event', authMiddleware(['exhibitor', 'visitor']), getAllUsersForEvent);
 
 // Event-related routes
 router.post('/get-sponsors', authMiddleware(['exhibitor', 'visitor']), getSponsors);
@@ -64,4 +68,10 @@ router.post('/toggle-slot-visibility', authMiddleware(['exhibitor', 'visitor']),
 router.post('/my-slot-status', authMiddleware(['exhibitor', 'visitor']), getMySlotStatus);
 router.post('/get-all-meetings', authMiddleware(['exhibitor', 'visitor']), getAllMeetings);
 router.post('/get-scanuser-eventwise', authMiddleware(['exhibitor', 'visitor']), getScans);
+
+//leads
+router.post('/get-leads', authMiddleware(['exhibitor','visitor']), getLeads);
+router.post('/create-lead', authMiddleware(['exhibitor','visitor']), createLead);
+router.post('/update-lead', authMiddleware(['exhibitor','visitor']), updateLead);
+router.post('/delete-lead', authMiddleware(['exhibitor','visitor']), deleteLead);
 module.exports = router;

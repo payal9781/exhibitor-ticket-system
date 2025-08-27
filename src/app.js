@@ -13,7 +13,7 @@ const swaggerDoc = require('./swagger');
 // CORS configuration
 app.use(cors({}));
 app.set('etag', false);
-
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Morgan logging configuration
 if (process.env.NODE_ENV === 'production') {
   // Use combined format in production (more detailed)

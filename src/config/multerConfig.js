@@ -1,6 +1,8 @@
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { v1: uuidv1 } = require('uuid');
+
 exports.upload = (folderPath) => {
   try {
     // Ensure folder exists
