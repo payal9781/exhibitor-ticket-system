@@ -7,7 +7,7 @@ const {
   registerVisitorForEvent,
   getEventRegistrationStats,
   getUpcomingEventsForRegistration,
-  registerForMultipleEvents
+  registerForMultipleEvents,
 } = require('../controllers/registrationController');
 
 // Public routes for event registration (no auth required)

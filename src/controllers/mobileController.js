@@ -178,16 +178,26 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
   const userType = req.user.type;
   const currentDate = new Date();
 
-  // Find events where user is registered
+  // Find events where user is registered and verified
   let query = {
     isDeleted: false,
-    isActive: true
+    isActive: true,
   };
 
   if (userType === 'exhibitor') {
-    query['exhibitor.userId'] = userId;
+    query['exhibitor'] = {
+      $elemMatch: {
+        userId: userId,
+        isVerified: true,
+      },
+    };
   } else {
-    query['visitor.userId'] = userId;
+    query['visitor'] = {
+      $elemMatch: {
+        userId: userId,
+        isVerified: true,
+      },
+    };
   }
 
   const events = await Event.find(query)
@@ -215,7 +225,7 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
     const scans = await Scan.find({
       scanner: userId,
       userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
-      eventId: event._id
+      eventId: event._id,
     });
 
     const uniqueScannedUsers = new Set();
@@ -242,8 +252,8 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
     message: 'Registered events retrieved successfully',
     data: {
       totalEvents: eventsWithDetails.length,
-      events: eventsWithDetails
-    }
+      events: eventsWithDetails,
+    },
   });
 });
 

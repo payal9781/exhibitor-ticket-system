@@ -52,7 +52,7 @@ router.post('/my-profile', authMiddleware(['exhibitor', 'visitor']), getMyProfil
 router.post('/update-profile', authMiddleware(['exhibitor', 'visitor']), updateMyProfile);
 
 router.post('/get-schedules', authMiddleware(['exhibitor', 'visitor']), getSchedules);
-router.post('/get-all-exhibitors-for-event', authMiddleware(['exhibitor', 'visitor']), getAllUsersForEvent);
+router.post('/get-all-connections-for-event', authMiddleware(['exhibitor', 'visitor']), getAllUsersForEvent);
 
 // Event-related routes
 router.post('/get-sponsors', authMiddleware(['exhibitor', 'visitor']), getSponsors);

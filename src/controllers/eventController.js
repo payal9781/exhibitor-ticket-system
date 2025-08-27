@@ -1583,6 +1583,58 @@ const getSponsors = asyncHandler(async (req, res) => {
   });
 });
 
+
+const approveParticipant = asyncHandler(async (req, res) => {
+  const { eventId, userId, userType } = req.params;
+
+  // Validate userType
+  if (!['exhibitor', 'visitor'].includes(userType)) {
+    return errorResponse(res, 'Invalid user type. Must be "exhibitor" or "visitor".', 400);
+  }
+
+  // Find the event
+  const event = await Event.findById(eventId);
+  if (!event || event.isDeleted) {
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  // Check if the user is authorized (organizer or superAdmin)
+  const user = req.user; // Assuming req.user is set by authentication middleware
+  if (user.type !== 'superAdmin' && event.organizerId.toString() !== user.id) {
+    return errorResponse(res, 'Unauthorized to approve participants for this event', 403);
+  }
+
+  // Find and update the participant
+  const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
+  const participant = participantArray.find(p => p.userId.toString() === userId);
+
+  if (!participant) {
+    return errorResponse(res, `${userType.charAt(0).toUpperCase() + userType.slice(1)} not found in event`, 404);
+  }
+
+  if (participant.isVerified) {
+    return successResponse(res, {
+      message: `${userType.charAt(0).toUpperCase() + userType.slice(1)} is already verified`,
+    });
+  }
+
+  participant.isVerified = true;
+  await event.save();
+
+  // Optionally, notify the participant (e.g., via email or notification system)
+  // Add your notification logic here if needed
+
+  successResponse(res, {
+    message: `${userType.charAt(0).toUpperCase() + userType.slice(1)} approved successfully`,
+    participant: {
+      userId: participant.userId,
+      isVerified: participant.isVerified,
+      registeredAt: participant.registeredAt,
+      qrCode: participant.qrCode
+    }
+  });
+});
+
 module.exports = {
   createEvent,
   addOrUpdateSchedule,
@@ -1610,5 +1662,6 @@ module.exports = {
   addSponsor,
   updateSponsor,
   removeSponsor,
-  getSponsors
+  getSponsors,
+  approveParticipant
 };

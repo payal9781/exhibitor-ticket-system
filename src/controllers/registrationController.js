@@ -61,10 +61,16 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   }
 
   const currentDate = new Date();
+  const eventFromDate = new Date(event.fromDate);
   const eventToDate = new Date(event.toDate);
+
+  // Check if registration is closed
   if (currentDate > eventToDate) {
-    return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
+    return errorResponse(res, 'Registration for this event has closed. The event has already ended.', 400);
   }
+
+  // Determine verification status
+  const isVerified = !(currentDate >= eventFromDate && currentDate <= eventToDate);
 
   let exhibitor;
   let isNewExhibitor = false;
@@ -134,7 +140,8 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
       },
       isNewExhibitor: false,
       alreadyRegistered: true,
-      qrCode: existingExhibitor.qrCode
+      qrCode: existingExhibitor.qrCode,
+      isVerified: existingExhibitor.isVerified
     });
   }
 
@@ -151,7 +158,8 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   event.exhibitor.push({
     userId: exhibitor._id,
     qrCode,
-    registeredAt: new Date()
+    registeredAt: new Date(),
+    isVerified
   });
 
   try {
@@ -189,7 +197,7 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   await event.save();
 
   successResponse(res, {
-    message: 'Exhibitor registered successfully for the event',
+    message: isVerified ? 'Exhibitor registered successfully for the event' : 'Exhibitor registered successfully but requires organizer approval',
     exhibitor: {
       _id: exhibitor._id,
       companyName: exhibitor.companyName,
@@ -198,6 +206,7 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     },
     isNewExhibitor,
     qrCode,
+    isVerified,
     event: {
       _id: event._id,
       title: event.title,
@@ -211,7 +220,6 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   const { registrationLink } = req.params;
   const visitorData = req.body;
 
-  // Find event by registration link
   const event = await Event.findOne({
     registrationLink,
     isDeleted: false
@@ -221,17 +229,21 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
 
-  // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
+  const eventFromDate = new Date(event.fromDate);
   const eventToDate = new Date(event.toDate);
+
+  // Check if registration is closed
   if (currentDate > eventToDate) {
-    return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
+    return errorResponse(res, 'Registration for this event has closed. The event has already ended.', 400);
   }
+
+  // Determine verification status
+  const isVerified = !(currentDate >= eventFromDate && currentDate <= eventToDate);
 
   let visitor;
   let isNewVisitor = false;
 
-  // Check if visitor already exists by phone or email
   if (visitorData.phone) {
     visitor = await Visitor.findOne({
       phone: visitorData.phone,
@@ -247,7 +259,6 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   }
 
   if (visitor) {
-    // Update existing visitor with new data if provided
     Object.keys(visitorData).forEach(key => {
       if (visitorData[key] && visitorData[key] !== '' && key !== 'keyWords') {
         visitor[key] = visitorData[key];
@@ -257,7 +268,6 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
       visitor.keyWords = visitorData.keyWords;
     }
   } else {
-    // Check for deleted visitor with same email
     if (visitorData.email) {
       const deletedVisitor = await Visitor.findOne({
         email: visitorData.email,
@@ -267,7 +277,6 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
         return errorResponse(res, 'Contact administrator', 409);
       }
     }
-    // Create new visitor
     visitor = new Visitor({
       ...visitorData,
       isActive: true
@@ -298,10 +307,8 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     isNewVisitor = true;
   }
 
-  // Save visitor
   await visitor.save();
 
-  // Check if visitor is already registered for this event
   const existingVisitor = event.visitor.find(vis => vis.userId.toString() === visitor._id.toString());
   if (existingVisitor) {
     return successResponse(res, {
@@ -315,6 +322,7 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
       isNewVisitor,
       alreadyRegistered: true,
       qrCode: existingVisitor.qrCode,
+      isVerified: existingVisitor.isVerified,
       event: {
         _id: event._id,
         title: event.title,
@@ -324,7 +332,6 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     });
   }
 
-  // Generate QR code
   const qrData = {
     eventId: event._id,
     userId: visitor._id,
@@ -335,14 +342,13 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   };
   const qrCode = await require('../utils/qrGenerator')(qrData);
 
-  // Add visitor to event with QR code
   event.visitor.push({
     userId: visitor._id,
     qrCode,
-    registeredAt: new Date()
+    registeredAt: new Date(),
+    isVerified
   });
 
-  // Generate slots for the visitor
   try {
     const existingSlots = await UserEventSlot.findOne({
       userId: visitor._id,
@@ -379,7 +385,7 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   await event.save();
 
   successResponse(res, {
-    message: 'Visitor registered successfully for the event',
+    message: isVerified ? 'Visitor registered successfully for the event' : 'Visitor registered successfully but requires organizer approval',
     visitor: {
       _id: visitor._id,
       name: visitor.name,
@@ -388,6 +394,7 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     },
     isNewVisitor,
     qrCode,
+    isVerified,
     event: {
       _id: event._id,
       title: event.title,
@@ -396,7 +403,6 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     }
   });
 });
-
 // Get event registration statistics
 const getEventRegistrationStats = asyncHandler(async (req, res) => {
   const { eventId } = req.params;
@@ -603,11 +609,13 @@ const registerForMultipleEvents = asyncHandler(async (req, res) => {
   });
 });
 
+
+
 module.exports = {
   getEventByRegistrationLink,
   registerExhibitorForEvent,
   registerVisitorForEvent,
   getEventRegistrationStats,
   getUpcomingEventsForRegistration,
-  registerForMultipleEvents
+  registerForMultipleEvents,
 };

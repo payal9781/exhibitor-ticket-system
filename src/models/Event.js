@@ -24,12 +24,14 @@ const eventSchema = new mongoose.Schema({
   exhibitor: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Exhibitor" },
     qrCode: { type: String },
-    registeredAt: { type: Date, default: Date.now }
+    registeredAt: { type: Date, default: Date.now },
+    isVerified: { type: Boolean, default: true },
   }],
   visitor: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Visitor" },
     qrCode: { type: String },
-    registeredAt: { type: Date, default: Date.now }
+    registeredAt: { type: Date, default: Date.now },
+    isVerified: { type: Boolean, default: true },
   }],
   sponsors: [{
     name: { type: String, required: true },
