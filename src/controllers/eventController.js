@@ -17,53 +17,84 @@ const uploadDir = path.join(__dirname, '..', 'uploads', 'banners');
 fs.mkdir(uploadDir, { recursive: true }).catch(err => console.error('Failed to create upload directory:', err));
 
 const createEvent = asyncHandler(async (req, res) => {
-  const { schedules, ...eventData } = req.body;
+  const { schedules, media, ...eventData } = req.body;
 
-  // Validate schedules
+  // Parse schedules if provided
+  let parsedSchedules = [];
   if (schedules) {
-    const parsedSchedules = typeof schedules === 'string' ? JSON.parse(schedules) : schedules;
+    parsedSchedules = typeof schedules === 'string' ? JSON.parse(schedules) : schedules;
     for (const schedule of parsedSchedules) {
       if (!schedule.activities || !Array.isArray(schedule.activities)) {
-        return errorResponse(res, 'Each schedule must have an activities array', 400);
+        return res.status(400).json({ message: 'Each schedule must have an activities array' });
       }
       for (const activity of schedule.activities) {
         if (!activity.title || !activity.startTime || !activity.endTime) {
-          return errorResponse(res, 'Activity title, startTime, and endTime are required', 400);
+          return res.status(400).json({ message: 'Activity title, startTime, and endTime are required' });
         }
         const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
         if (!timeRegex.test(activity.startTime) || !timeRegex.test(activity.endTime)) {
-          return errorResponse(res, 'Invalid time format for activities. Use HH:MM', 400);
+          return res.status(400).json({ message: 'Invalid time format for activities. Use HH:MM' });
         }
       }
       if (schedule.date) {
         const scheduleDate = new Date(schedule.date);
-        if (isNaN(scheduleDate.getTime()) || 
-            scheduleDate < new Date(eventData.fromDate) || 
+        if (isNaN(scheduleDate.getTime()) ||
+            scheduleDate < new Date(eventData.fromDate) ||
             scheduleDate > new Date(eventData.toDate)) {
-          return errorResponse(res, 'Schedule date must be within event date range', 400);
+          return res.status(400).json({ message: 'Schedule date must be within event date range' });
         }
       }
     }
-    eventData.schedules = parsedSchedules;
   }
 
-  // Handle banner uploads
-  let mediaUrls = [];
+  // Handle banner uploads and metadata
+  let mediaData = [];
   if (req.files && req.files.banners) {
     const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
-    for (const file of banners) {
-      const fileUrl = file?.path || '';
-      mediaUrls.push(fileUrl);
+    const parsedMedia = typeof media === 'string' ? JSON.parse(media) : media;
+
+    if (!parsedMedia || !Array.isArray(parsedMedia)) {
+      return res.status(400).json({ message: 'Media must be an array of banner objects' });
+    }
+
+    if (banners.length !== parsedMedia.length) {
+      return res.status(400).json({ message: 'Number of uploaded files must match media metadata' });
+    }
+
+    mediaData = banners.map((file, index) => {
+      const bannerData = parsedMedia[index] || {};
+      return {
+        fileUrl: file?.path || '',
+        title: bannerData.title || '',
+        description: bannerData.description || '',
+        redirectUrl: bannerData.redirectUrl || '',
+        fromDate: bannerData.fromDate ? new Date(bannerData.fromDate) : null,
+        toDate: bannerData.toDate ? new Date(bannerData.toDate) : null,
+      };
+    });
+
+    // Validate date ranges for banners
+    for (const banner of mediaData) {
+      if (banner.fromDate && banner.toDate) {
+        const fromDate = new Date(banner.fromDate);
+        const toDate = new Date(banner.toDate);
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime()) ||
+            fromDate < new Date(eventData.fromDate) || toDate > new Date(eventData.toDate)) {
+          return res.status(400).json({ message: 'Banner dates must be within event date range' });
+        }
+      }
     }
   }
 
-  const event = new Event({ 
-    ...eventData, 
+  const event = new Event({
+    ...eventData,
     organizerId: req.user.id,
-    media: mediaUrls
+    media: mediaData,
+    schedules: parsedSchedules,
   });
+
   await event.save();
-  successResponse(res, event, 201);
+  res.status(201).json(event);
 });
 
 const addOrUpdateSchedule = asyncHandler(async (req, res) => {
@@ -262,20 +293,20 @@ const getEventById = asyncHandler(async (req, res) => {
 });
 
 const updateEvent = asyncHandler(async (req, res) => {
-  const { id, schedules, fromDate, toDate, ...updateData } = req.body;
+  const { id, schedules, fromDate, toDate, media, ...updateData } = req.body;
+
   const event = await Event.findById(id);
-  if (!event) return errorResponse(res, 'Event not found', 404);
+  if (!event) return res.status(404).json({ message: 'Event not found' });
+
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
-    return errorResponse(res, 'Access denied', 403);
+    return res.status(403).json({ message: 'Access denied' });
   }
 
   // Check if event has exhibitors or visitors
   const hasExhibitors = event.exhibitor && event.exhibitor.length > 0;
   const hasVisitors = event.visitor && event.visitor.length > 0;
-
-  // Prevent updating fromDate or toDate if exhibitors or visitors exist
   if ((hasExhibitors || hasVisitors) && (fromDate || toDate)) {
-    return errorResponse(res, 'Cannot update event dates when exhibitors or visitors are associated', 400);
+    return res.status(400).json({ message: 'Cannot update event dates when exhibitors or visitors are associated' });
   }
 
   // Validate schedules
@@ -283,43 +314,71 @@ const updateEvent = asyncHandler(async (req, res) => {
     const parsedSchedules = typeof schedules === 'string' ? JSON.parse(schedules) : schedules;
     for (const schedule of parsedSchedules) {
       if (!schedule.activities || !Array.isArray(schedule.activities)) {
-        return errorResponse(res, 'Each schedule must have an activities array', 400);
+        return res.status(400).json({ message: 'Each schedule must have an activities array' });
       }
       for (const activity of schedule.activities) {
         if (!activity.title || !activity.startTime || !activity.endTime) {
-          return errorResponse(res, 'Activity title, startTime, and endTime are required', 400);
+          return res.status(400).json({ message: 'Activity title, startTime, and endTime are required' });
         }
         const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
         if (!timeRegex.test(activity.startTime) || !timeRegex.test(activity.endTime)) {
-          return errorResponse(res, 'Invalid time format for activities. Use HH:MM', 400);
+          return res.status(400).json({ message: 'Invalid time format for activities. Use HH:MM' });
         }
       }
       if (schedule.date) {
         const scheduleDate = new Date(schedule.date);
         const eventFromDate = fromDate ? new Date(fromDate) : event.fromDate;
         const eventToDate = toDate ? new Date(toDate) : event.toDate;
-        if (isNaN(scheduleDate.getTime()) || 
-            scheduleDate < eventFromDate || 
+        if (isNaN(scheduleDate.getTime()) ||
+            scheduleDate < eventFromDate ||
             scheduleDate > eventToDate) {
-          return errorResponse(res, 'Schedule date must be within event date range', 400);
+          return res.status(400).json({ message: 'Schedule date must be within event date range' });
         }
       }
     }
     event.schedules = parsedSchedules;
   }
 
-  // Handle banner uploads
+  // Handle banner uploads and metadata
   if (req.files && req.files.banners) {
     const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
-    const mediaUrls = [];
-    for (const file of banners) {
-      const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
-    for (const file of banners) {
-      const fileUrl = file?.path || '';
-      mediaUrls.push(fileUrl);
+    const parsedMedia = typeof media === 'string' ? JSON.parse(media) : media;
+
+    if (!parsedMedia || !Array.isArray(parsedMedia)) {
+      return res.status(400).json({ message: 'Media must be an array of banner objects' });
     }
+
+    if (banners.length !== parsedMedia.length) {
+      return res.status(400).json({ message: 'Number of uploaded files must match media metadata' });
     }
-    event.media = mediaUrls; // Replace existing media with new uploads
+
+    const mediaData = banners.map((file, index) => {
+      const bannerData = parsedMedia[index] || {};
+      return {
+        fileUrl: file?.path || '',
+        title: bannerData.title || '',
+        description: bannerData.description || '',
+        redirectUrl: bannerData.redirectUrl || '',
+        fromDate: bannerData.fromDate ? new Date(bannerData.fromDate) : null,
+        toDate: bannerData.toDate ? new Date(bannerData.toDate) : null,
+      };
+    });
+
+    // Validate date ranges for banners
+    const eventFromDate = fromDate ? new Date(fromDate) : event.fromDate;
+    const eventToDate = toDate ? new Date(toDate) : event.toDate;
+    for (const banner of mediaData) {
+      if (banner.fromDate && banner.toDate) {
+        const fromDate = new Date(banner.fromDate);
+        const toDate = new Date(banner.toDate);
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime()) ||
+            fromDate < eventFromDate || toDate > eventToDate) {
+          return res.status(400).json({ message: 'Banner dates must be within event date range' });
+        }
+      }
+    }
+
+    event.media = mediaData; // Replace existing media with new uploads
   }
 
   // Update other fields
@@ -328,7 +387,7 @@ const updateEvent = asyncHandler(async (req, res) => {
   if (toDate) event.toDate = toDate;
 
   await event.save();
-  successResponse(res, event);
+  res.json(event);
 });
 const deleteEvent = asyncHandler(async (req, res) => {
   const { id } = req.body;
@@ -817,7 +876,7 @@ const getEventParticipants = asyncHandler(async (req, res) => {
 
   // Ensure exhibitors and visitors are arrays and filter out null userId entries
   const exhibitors = (event.exhibitor || [])
-    .filter(ex => ex.userId) // Exclude entries with null userId
+    .filter(ex => ex.userId && ex.isVerified) // Exclude entries with null userId
     .map(ex => ({
       _id: ex.userId._id.toString(),
       companyName: ex.userId.companyName,
@@ -833,7 +892,7 @@ const getEventParticipants = asyncHandler(async (req, res) => {
     }));
 
   const visitors = (event.visitor || [])
-    .filter(vis => vis.userId) // Exclude entries with null userId
+    .filter(vis => vis.userId && vis.isVerified) // Exclude entries with null userId
     .map(vis => ({
       _id: vis.userId._id.toString(),
       name: vis.userId.name,
@@ -1585,6 +1644,7 @@ const getSponsors = asyncHandler(async (req, res) => {
 
 
 const approveParticipant = asyncHandler(async (req, res) => {
+  console.log('[approveParticipant] Request received');
   const { eventId, userId, userType } = req.body;
 
   console.log(`[approveParticipant] Start: eventId=${eventId}, userId=${userId}, userType=${userType}`);

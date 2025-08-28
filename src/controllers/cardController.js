@@ -16,6 +16,13 @@ exports.saveCard = asyncHandler(async (req, res) => {
     return successResponse(res, result, 200);
 });
 
+exports.updateCard = asyncHandler(async (req, res) => {
+    let { id, ...data } = req.body;
+    data.userId = req.user.id;
+    let card = await models.ScannedCards.findByIdAndUpdate(id, data);
+    return successResponse(res, card, 200);
+});
+
 exports.deleteCard = asyncHandler(async (req, res) => {
     let { id } = req.body;
     await models.ScannedCards.findByIdAndDelete(id);

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const asyncHandler = require('express-async-handler'); // Assume installed
 const authMiddleware = (roles = []) => asyncHandler(async (req, res, next) => {
+  console.log("Middleware called!");
   const token = req.header('Authorization')?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ message: 'No token provided' });
   try {

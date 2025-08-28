@@ -197,33 +197,34 @@ const getExhibitors = asyncHandler(async (req, res) => {
   const { search, status, page = 1, limit = 10, organizerId } = req.body;
   const userRole = req.user.type;
   const currentUserId = req.user.id;
-  
+
   let exhibitors;
   let total;
-  
+
   // If organizer is requesting, filter by their events only
   if (userRole === 'organizer' || organizerId) {
     const targetOrganizerId = organizerId || currentUserId;
-    
+
     // Get all events organized by this organizer
-    const organizerEvents = await Event.find({ 
-      organizerId: targetOrganizerId, 
-      isDeleted: false 
-    }).select('_id');
-    
+    const organizerEvents = await Event.find({
+      organizerId: targetOrganizerId,
+      isDeleted: false
+    }).select('_id exhibitor');
+
     const eventIds = organizerEvents.map(event => new mongoose.Types.ObjectId(event._id));
-    
-    // Find exhibitors who have attended these events
+
+    // Find exhibitors who have attended these events and are verified
     const attendedExhibitors = await Event.aggregate([
       { $match: { _id: { $in: eventIds } } },
       { $unwind: '$exhibitor' },
+      { $match: { 'exhibitor.isVerified': true } }, // Filter for verified exhibitors
       { $group: { _id: '$exhibitor.userId' } }
     ]);
-    
+
     const exhibitorIds = attendedExhibitors.map(item => item._id);
-    
+
     if (exhibitorIds.length === 0) {
-      return successResponse(res, {
+      return res.status(200).json({
         exhibitors: [],
         pagination: {
           currentPage: parseInt(page),
@@ -233,19 +234,19 @@ const getExhibitors = asyncHandler(async (req, res) => {
         }
       });
     }
-    
-    let query = { 
+
+    let query = {
       _id: { $in: exhibitorIds },
-      isDeleted: false 
+      isDeleted: false
     };
-    
+
     // Filter by status
     if (status && status !== 'all') {
       query.isActive = status === 'active';
     } else {
       query.isActive = true;
     }
-    
+
     // Add search functionality
     if (search && search.trim()) {
       query.$or = [
@@ -258,27 +259,27 @@ const getExhibitors = asyncHandler(async (req, res) => {
         { website: { $regex: search, $options: 'i' } }
       ];
     }
-    
+
     // Calculate pagination
     const skip = (page - 1) * limit;
     total = await Exhibitor.countDocuments(query);
-    
+
     exhibitors = await Exhibitor.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-      
+
   } else {
-    // SuperAdmin can see all exhibitors
+    // SuperAdmin can see all verified exhibitors
     let query = { isDeleted: false };
-    
+
     // Filter by status
     if (status && status !== 'all') {
       query.isActive = status === 'active';
     } else {
       query.isActive = true;
     }
-    
+
     // Add search functionality
     if (search && search.trim()) {
       query.$or = [
@@ -291,17 +292,40 @@ const getExhibitors = asyncHandler(async (req, res) => {
         { website: { $regex: search, $options: 'i' } }
       ];
     }
-    
+
+    // Find events with verified exhibitors
+    const attendedExhibitors = await Event.aggregate([
+      { $unwind: '$exhibitor' },
+      { $match: { 'exhibitor.isVerified': true } },
+      { $group: { _id: '$exhibitor.userId' } }
+    ]);
+
+    const exhibitorIds = attendedExhibitors.map(item => item._id);
+
+    if (exhibitorIds.length > 0) {
+      query._id = { $in: exhibitorIds };
+    } else {
+      return res.status(200).json({
+        exhibitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+
     // Calculate pagination
     const skip = (page - 1) * limit;
     total = await Exhibitor.countDocuments(query);
-    
+
     exhibitors = await Exhibitor.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
   }
-  
+
   const response = {
     exhibitors,
     pagination: {
@@ -311,8 +335,8 @@ const getExhibitors = asyncHandler(async (req, res) => {
       itemsPerPage: parseInt(limit)
     }
   };
-  
-  successResponse(res, response);
+
+  res.status(200).json(response);
 });
 
 const getExhibitorById = asyncHandler(async (req, res) => {

@@ -195,33 +195,34 @@ const getVisitors = asyncHandler(async (req, res) => {
   const { search, status, page = 1, limit = 10, organizerId } = req.body;
   const userRole = req.user.type;
   const currentUserId = req.user.id;
-  
+
   let visitors;
   let total;
-  
+
   // If organizer is requesting, filter by their events only
   if (userRole === 'organizer' || organizerId) {
     const targetOrganizerId = organizerId || currentUserId;
-    
+
     // Get all events organized by this organizer
-    const organizerEvents = await Event.find({ 
-      organizerId: targetOrganizerId, 
-      isDeleted: false 
-    }).select('_id');
-    
+    const organizerEvents = await Event.find({
+      organizerId: targetOrganizerId,
+      isDeleted: false
+    }).select('_id visitor');
+
     const eventIds = organizerEvents.map(event => event._id);
-    
-    // Find visitors who have attended these events
+
+    // Find visitors who have attended these events and are verified
     const attendedVisitors = await Event.aggregate([
       { $match: { _id: { $in: eventIds } } },
       { $unwind: '$visitor' },
+      { $match: { 'visitor.isVerified': true } }, // Filter for verified visitors
       { $group: { _id: '$visitor.userId' } }
     ]);
-    
+
     const visitorIds = attendedVisitors.map(item => item._id);
-    
+
     if (visitorIds.length === 0) {
-      return successResponse(res, {
+      return res.status(200).json({
         visitors: [],
         pagination: {
           currentPage: parseInt(page),
@@ -231,19 +232,19 @@ const getVisitors = asyncHandler(async (req, res) => {
         }
       });
     }
-    
-    let query = { 
+
+    let query = {
       _id: { $in: visitorIds },
-      isDeleted: false 
+      isDeleted: false
     };
-    
+
     // Filter by status
     if (status && status !== 'all') {
       query.isActive = status === 'active';
     } else {
       query.isActive = true;
     }
-    
+
     // Add search functionality
     if (search && search.trim()) {
       query.$or = [
@@ -256,27 +257,27 @@ const getVisitors = asyncHandler(async (req, res) => {
         { bio: { $regex: search, $options: 'i' } }
       ];
     }
-    
+
     // Calculate pagination
     const skip = (page - 1) * limit;
     total = await Visitor.countDocuments(query);
-    
+
     visitors = await Visitor.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-      
+
   } else {
-    // SuperAdmin can see all visitors
+    // SuperAdmin can see all verified visitors
     let query = { isDeleted: false };
-    
+
     // Filter by status
     if (status && status !== 'all') {
       query.isActive = status === 'active';
     } else {
       query.isActive = true;
     }
-    
+
     // Add search functionality
     if (search && search.trim()) {
       query.$or = [
@@ -289,17 +290,40 @@ const getVisitors = asyncHandler(async (req, res) => {
         { bio: { $regex: search, $options: 'i' } }
       ];
     }
-    
+
+    // Find events with verified visitors
+    const attendedVisitors = await Event.aggregate([
+      { $unwind: '$visitor' },
+      { $match: { 'visitor.isVerified': true } },
+      { $group: { _id: '$visitor.userId' } }
+    ]);
+
+    const visitorIds = attendedVisitors.map(item => item._id);
+
+    if (visitorIds.length > 0) {
+      query._id = { $in: visitorIds };
+    } else {
+      return res.status(200).json({
+        visitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+
     // Calculate pagination
     const skip = (page - 1) * limit;
     total = await Visitor.countDocuments(query);
-    
+
     visitors = await Visitor.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
   }
-  
+
   const response = {
     visitors,
     pagination: {
@@ -309,8 +333,8 @@ const getVisitors = asyncHandler(async (req, res) => {
       itemsPerPage: parseInt(limit)
     }
   };
-  
-  successResponse(res, response);
+
+  res.status(200).json(response);
 });
 
 const getVisitorById = asyncHandler(async (req, res) => {

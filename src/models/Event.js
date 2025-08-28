@@ -1,5 +1,6 @@
 // src/models/Event.js
 const mongoose = require('mongoose');
+
 const eventSchema = new mongoose.Schema({
   organizerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -13,8 +14,15 @@ const eventSchema = new mongoose.Schema({
   startTime: { type: String, required: true }, // Format: "HH:MM:SS"
   endTime: { type: String, required: true }, // Format: "HH:MM:SS"
   location: { type: String, required: true },
-  media: [{ type: String }],
-    meetingStartTime: String, // e.g., "14:00:00"
+  media: [{
+    title: { type: String, default: "" },
+    description: { type: String, default: "" },
+    redirectUrl: { type: String, default: "" },
+    fromDate: { type: Date, default: null },
+    toDate: { type: Date, default: null },
+    fileUrl: { type: String, default: "" } // Store the uploaded file URL
+  }],
+  meetingStartTime: String, // e.g., "14:00:00"
   meetingEndTime: String, // e.g., "16:00:00"
   timeInterval: Number, // in minutes, e.g., 15
   registrationLink: { type: String, unique: true },
@@ -52,4 +60,5 @@ const eventSchema = new mongoose.Schema({
     }]
   }]
 }, { timestamps: true });
+
 module.exports = mongoose.models.Event || mongoose.model('Event', eventSchema);
