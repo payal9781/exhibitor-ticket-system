@@ -246,6 +246,10 @@ const getEvents = asyncHandler(async (req, res) => {
 
   const events = await Event.find(query)
     .populate('organizerId', 'name email organizationName')
+    .select({
+      exhibitor: { $elemMatch: { isVerified: true } }, // Filter exhibitors with isVerified: true
+      visitor: { $elemMatch: { isVerified: true } } // Filter visitors with isVerified: true
+    })
     .sort({ fromDate: -1 })
     .skip(skip)
     .limit(parseInt(limit));
