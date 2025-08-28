@@ -112,7 +112,7 @@ const sendOtp = asyncHandler(async (req, res) => {
 });
 
 const verifyOtp = asyncHandler(async (req, res) => {
-  const { role, phone, otp, machineId } = req.body;
+  const { role, phone, otp, machineId ,fcmToken} = req.body;
   if (!['exhibitor', 'visitor'].includes(role)) {
     return successResponse(res, { message: 'Invalid role for OTP login', data: 0 });
   }
@@ -140,6 +140,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
     return successResponse(res, { message: 'Invalid device id', data: 0 });
   } else {
     user.machineId = machineId;
+    user.fcmToken = fcmToken;
     await user.save();
   }
 
@@ -182,7 +183,7 @@ const login = asyncHandler(async (req, res) => {
 
 
 const loginApp = asyncHandler(async (req, res) => {
-  const { role, phone, machineId } = req.body;
+  const { role, phone, machineId ,fcmToken} = req.body;
 
   // Validate role
   if (!['exhibitor', 'visitor'].includes(role)) {
@@ -216,7 +217,8 @@ const loginApp = asyncHandler(async (req, res) => {
   }
 
   const token = user.generateAccessToken();
-
+  user.fcmToken = fcmToken;
+  await user.save();
   // Prepare user response
   const userResponse = user.toObject();
   delete userResponse.password;

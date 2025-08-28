@@ -18,7 +18,8 @@ const exhibitorSchema = new mongoose.Schema({
   isDeleted: { type: Boolean, default: false },
   machineId: { type: String ,default: ''},
   otp: { type: String },
-  otpExpires: { type: Date }
+  otpExpires: { type: Date },
+  fcmToken: {type:String,default:''}
 }, { timestamps: true });
 exhibitorSchema.methods.generateAccessToken = function () {
   return jwt.sign(

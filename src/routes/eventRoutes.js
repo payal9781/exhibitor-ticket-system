@@ -61,6 +61,6 @@ router.post('/add-sponsor', authMiddleware(['organizer', 'superAdmin']), addSpon
 router.post('/update-sponsor', authMiddleware(['organizer', 'superAdmin']), updateSponsor);
 router.post('/remove-sponsor', authMiddleware(['organizer', 'superAdmin']), removeSponsor);
 router.post('/get-sponsors', authMiddleware(['organizer', 'superAdmin', 'exhibitor', 'visitor']), getSponsors);
-router.post('/approve/:eventId/:userId/:userType', authMiddleware, approveParticipant);
+router.post('/approve', authMiddleware, approveParticipant); 
 
 module.exports = router;

@@ -19,7 +19,8 @@ const visitorSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   isDeleted: { type: Boolean, default: false },
   otp: { type: String },
-  otpExpires: { type: Date }
+  otpExpires: { type: Date },
+  fcmToken: {type:String,default:''}
 }, { timestamps: true });
 visitorSchema.methods.generateAccessToken = function () {
   return jwt.sign(

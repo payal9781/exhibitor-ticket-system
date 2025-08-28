@@ -63,8 +63,8 @@ app.get('/register/:registrationLink', async (req, res) => {
     }
     // Check if event registration is still valid (before event start date)
     const currentDate = new Date();
-    const eventStartDate = new Date(event.fromDate);
-    if (currentDate > eventStartDate) {
+    const eventToDate = new Date(event.toDate);
+    if (currentDate > eventToDate) {
       return res.status(400).render('error', {
         title: 'Registration Closed',
         message: 'Registration for this event has closed. The event has already started.',

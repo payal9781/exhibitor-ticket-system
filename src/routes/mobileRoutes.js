@@ -6,6 +6,7 @@ const {
   getEventConnections,
   getMyRegisteredEvents,
   getAttendedEvents,
+  getEventAnalytics,
   recordScan,
   getScanStatistics,
   getScannedUserSlots,
@@ -38,7 +39,7 @@ const { getCategories } = require('../controllers/categoryController');
 
 // Dashboard route
 router.post('/dashboard', authMiddleware(['exhibitor', 'visitor']), getMobileDashboard);
-
+router.post('/analytics', authMiddleware, getEventAnalytics);
 // Connection and scanning routes
 router.post('/total-connections', authMiddleware(['exhibitor', 'visitor']), getTotalConnections);
 router.post('/event-connections', authMiddleware(['exhibitor', 'visitor']), getEventConnections);

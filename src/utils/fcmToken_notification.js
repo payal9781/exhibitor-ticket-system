@@ -1,4 +1,4 @@
-const firebase = require('../core/firebase');
+const firebase = require('../config/firebase');
 const notification = firebase.notification();
 
 exports.sendNotification = async (Token, messages) => {

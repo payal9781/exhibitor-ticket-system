@@ -1585,41 +1585,53 @@ const getSponsors = asyncHandler(async (req, res) => {
 
 
 const approveParticipant = asyncHandler(async (req, res) => {
-  const { eventId, userId, userType } = req.params;
+  const { eventId, userId, userType } = req.body;
+
+  console.log(`[approveParticipant] Start: eventId=${eventId}, userId=${userId}, userType=${userType}`);
 
   // Validate userType
   if (!['exhibitor', 'visitor'].includes(userType)) {
+    console.error(`[approveParticipant] Invalid userType: ${userType}`);
     return errorResponse(res, 'Invalid user type. Must be "exhibitor" or "visitor".', 400);
   }
 
   // Find the event
+  console.log(`[approveParticipant] Fetching event: eventId=${eventId}`);
   const event = await Event.findById(eventId);
   if (!event || event.isDeleted) {
+    console.error(`[approveParticipant] Event not found or deleted: eventId=${eventId}`);
     return errorResponse(res, 'Event not found', 404);
   }
 
   // Check if the user is authorized (organizer or superAdmin)
   const user = req.user; // Assuming req.user is set by authentication middleware
+  console.log(`[approveParticipant] User: id=${user.id}, type=${user.type}`);
   if (user.type !== 'superAdmin' && event.organizerId.toString() !== user.id) {
+    console.error(`[approveParticipant] Unauthorized user: id=${user.id}, organizerId=${event.organizerId}`);
     return errorResponse(res, 'Unauthorized to approve participants for this event', 403);
   }
 
   // Find and update the participant
+  console.log(`[approveParticipant] Searching for participant: userId=${userId}, userType=${userType}`);
   const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
   const participant = participantArray.find(p => p.userId.toString() === userId);
-
   if (!participant) {
+    console.error(`[approveParticipant] Participant not found: userId=${userId}, userType=${userType}, eventId=${eventId}`);
     return errorResponse(res, `${userType.charAt(0).toUpperCase() + userType.slice(1)} not found in event`, 404);
   }
 
   if (participant.isVerified) {
+    console.log(`[approveParticipant] Participant already verified: userId=${userId}, userType=${userType}`);
     return successResponse(res, {
       message: `${userType.charAt(0).toUpperCase() + userType.slice(1)} is already verified`,
     });
   }
 
+  console.log(`[approveParticipant] Updating participant: userId=${userId}, userType=${userType}`);
   participant.isVerified = true;
   await event.save();
+
+  console.log(`[approveParticipant] Participant approved: userId=${userId}, userType=${userType}, eventId=${eventId}`);
 
   // Optionally, notify the participant (e.g., via email or notification system)
   // Add your notification logic here if needed
@@ -1630,8 +1642,8 @@ const approveParticipant = asyncHandler(async (req, res) => {
       userId: participant.userId,
       isVerified: participant.isVerified,
       registeredAt: participant.registeredAt,
-      qrCode: participant.qrCode
-    }
+      qrCode: participant.qrCode,
+    },
   });
 });
 

@@ -22,9 +22,9 @@ const getEventByRegistrationLink = asyncHandler(async (req, res) => {
 
   // Check if event registration is still valid (before event start date)
   const currentDate = new Date();
-  const eventStartDate = new Date(event.fromDate);
+  const eventToDate = new Date(event.toDate);
 
-  if (currentDate > eventStartDate) {
+  if (currentDate > eventToDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
   }
 

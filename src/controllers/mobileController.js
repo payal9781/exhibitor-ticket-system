@@ -8,7 +8,7 @@ const Meeting = require('../models/z-index').models.Meeting;
 const UserEventSlot = require('../models/UserEventSlot');
 const { default: mongoose } = require('mongoose');
 const Attendance = require('../models/z-index').models.Attendance;
-
+const fcmNotification = require('../utils/fcmToken_notification').sendNotification;
 // Get total connections for exhibitor/visitor across all events
 const getTotalConnections = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -84,6 +84,114 @@ const getTotalConnections = asyncHandler(async (req, res) => {
       totalAcceptedMeetings,
       eventWiseConnections: eventConnections
     }
+  });
+});
+
+const getEventAnalytics = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+  const userId = req.user.id;
+  const userType = req.user.type;
+
+  console.log(`[getEventAnalytics] Start: eventId=${eventId}, userId=${userId}, userType=${userType}`);
+
+  // Find the event
+  const event = await Event.findById(eventId).select('title exhibitor visitor');
+  if (!event || event.isDeleted) {
+    console.error(`[getEventAnalytics] Event not found or deleted: eventId=${eventId}`);
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  // Verify user is registered for the event
+  const isRegistered = userType === 'exhibitor'
+    ? event.exhibitor.some(ex => ex.userId.toString() === userId && ex.isVerified)
+    : event.visitor.some(vis => vis.userId.toString() === userId && vis.isVerified);
+  if (!isRegistered) {
+    console.error(`[getEventAnalytics] User not registered: userId=${userId}, userType=${userType}`);
+    return errorResponse(res, 'You are not registered for this event', 403);
+  }
+
+  // Total Visitors (verified)
+  const totalVisitors = event.visitor.filter(vis => vis.isVerified).length;
+
+  // Total Exhibitors (verified)
+  const totalExhibitors = event.exhibitor.filter(ex => ex.isVerified).length;
+
+  // Total Card Scans for the event
+  const totalCardScans = await Scan.countDocuments({ eventId });
+
+  // Profile Exchanged (unique scannedCards entries for the event)
+  const profileExchanged = await ScannedCard.countDocuments({ userId: { $in: [...event.exhibitor, ...event.visitor].map(p => p.userId) } });
+
+  // One-to-One Meetings (accepted meetings for the event)
+  const oneToOneMeetings = await Meeting.countDocuments({
+    eventId,
+    status: 'accepted',
+  });
+
+  // Connections Done (unique scanned users for the event)
+  const scans = await Scan.find({ eventId });
+  const uniqueScannedUsers = new Set();
+  scans.forEach(scan => {
+    scan.scannedUser.forEach(scannedUserId => {
+      uniqueScannedUsers.add(scannedUserId.toString());
+    });
+  });
+  const connectionsDone = uniqueScannedUsers.size;
+
+  // Exhibitor-wise Analytics
+  const exhibitorAnalytics = await Promise.all(
+    event.exhibitor
+      .filter(ex => ex.isVerified)
+      .map(async (ex) => {
+        // Card Scans by this exhibitor
+        const exhibitorCardScans = await Scan.countDocuments({ scanner: ex.userId, eventId });
+
+        // Profile Exchanged (scannedCards entries by this exhibitor)
+        const exhibitorProfileExchanged = await ScannedCard.countDocuments({ userId: ex.userId });
+
+        // One-to-One Meetings (accepted meetings involving this exhibitor)
+        const exhibitorMeetings = await Meeting.countDocuments({
+          eventId,
+          status: 'accepted',
+          $or: [
+            { requesterId: ex.userId, requesterType: 'exhibitor' },
+            { recipientId: ex.userId, requestedType: 'exhibitor' },
+          ],
+        });
+
+        // Connections Done (unique scanned users by this exhibitor)
+        const exhibitorScans = await Scan.find({ scanner: ex.userId, eventId });
+        const exhibitorUniqueScannedUsers = new Set();
+        exhibitorScans.forEach(scan => {
+          scan.scannedUser.forEach(scannedUserId => {
+            exhibitorUniqueScannedUsers.add(scannedUserId.toString());
+          });
+        });
+
+        return {
+          exhibitorId: ex.userId.toString(),
+          exhibitorName: (await require('../models/Exhibitor').findById(ex.userId).select('companyName'))?.companyName || 'Unknown',
+          cardScans: exhibitorCardScans,
+          profileExchanged: exhibitorProfileExchanged,
+          oneToOneMeetings: exhibitorMeetings,
+          connectionsDone: exhibitorUniqueScannedUsers.size,
+        };
+      })
+  );
+
+  successResponse(res, {
+    message: 'Event analytics retrieved successfully',
+    data: {
+      eventId,
+      eventTitle: event.title,
+      totalVisitors,
+      totalExhibitors,
+      totalCardScans,
+      profileExchanged,
+      oneToOneMeetings,
+      connectionsDone,
+      exhibitorAnalytics,
+    },
   });
 });
 
@@ -640,12 +748,13 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
   let requesterDetails;
   if (requesterType === 'exhibitor') {
     requesterDetails = await Exhibitor.findById(requesterId)
-      .select('companyName email phone profileImage');
+      .select('companyName email phone profileImage fcmToken');
   } else {
     requesterDetails = await Visitor.findById(requesterId)
-      .select('name email phone profileImage companyName');
+      .select('name email phone profileImage companyName fcmToken');
   }
 
+  await fcmNotification(requesterDetails.fcmToken,['meeting request',`${companyName} has sent you a meeting request`,{}]);
   successResponse(res, {
     message: 'Meeting request sent successfully',
     meeting: {
@@ -758,7 +867,15 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
       await userSlot.save();
     }
   }
-
+  let requesterDetails;
+  if (requesterType === 'exhibitor') {
+    requesterDetails = await Exhibitor.findById(meeting.requestedId)
+      .select('companyName email phone profileImage fcmToken');
+  } else {
+    requesterDetails = await Visitor.findById(meeting.requestedId)
+      .select('name email phone profileImage companyName fcmToken');
+  }
+  await fcmNotification(requesterDetails.fcmToken,['meeting request',`${companyName} has ${status} you a meeting request`,{}]);
   successResponse(res, {
     message: `Meeting request ${status} successfully`,
     meeting: {
@@ -1352,6 +1469,7 @@ const getScans = asyncHandler(async (req, res) => {
 
 module.exports = {
   getTotalConnections,
+  getEventAnalytics,
   getEventConnections,
   getMyRegisteredEvents,
   getAttendedEvents,
