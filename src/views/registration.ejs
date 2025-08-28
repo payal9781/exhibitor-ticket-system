@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -165,8 +166,13 @@
                             </div>
                             
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Location</label>
-                                <input type="text" name="location" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">City</label>
+                                <input type="text" name="address.city" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">State</label>
+                                <input type="text" name="address.state" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                             </div>
                         </div>
                         
@@ -216,9 +222,7 @@
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Website</label>
-                                <input type="text" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus
-
-:ring-2 focus:ring-green-500 focus:border-transparent">
+                                <input type="text" name="website" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
                                 <p id="visitorWebsiteError" class="error-message hidden">Please enter a valid URL (e.g., https://example.com)</p>
                             </div>
                             
@@ -228,8 +232,13 @@
                             </div>
                             
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Location</label>
-                                <input type="text" name="location" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">City</label>
+                                <input type="text" name="address.city" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">State</label>
+                                <input type="text" name="address.state" class="form-input w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
                             </div>
                         </div>
                         
@@ -403,12 +412,16 @@
             loadingOverlay.classList.add('flex');
 
             try {
-                const data = {};
+                const data = { address: {} };
                 for (let [key, value] of formData.entries()) {
                     if (key === 'keyWords' && value) {
                         data[key] = value.split(',').map(k => k.trim()).filter(k => k);
                     } else if (key === 'website' && value) {
                         data[key] = normalizeUrl(value);
+                    } else if (key === 'address.city') {
+                        data.address.city = value;
+                    } else if (key === 'address.state') {
+                        data.address.state = value;
                     } else {
                         data[key] = value;
                     }
