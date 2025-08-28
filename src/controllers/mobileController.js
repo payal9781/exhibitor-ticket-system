@@ -754,7 +754,8 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
       .select('name email phone profileImage companyName fcmToken');
   }
 
-  await fcmNotification(requesterDetails.fcmToken,['meeting request',`${companyName} has sent you a meeting request`,{}]);
+  const result = await fcmNotification(requesterDetails.fcmToken,['meeting request',`${requesterDetails?.companyName} has sent you a meeting request`,{}]);
+  console.log(result);
   successResponse(res, {
     message: 'Meeting request sent successfully',
     meeting: {
@@ -875,7 +876,7 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
     requesterDetails = await Visitor.findById(meeting.requestedId)
       .select('name email phone profileImage companyName fcmToken');
   }
-  await fcmNotification(requesterDetails.fcmToken,['meeting request',`${companyName} has ${status} you a meeting request`,{}]);
+  await fcmNotification(requesterDetails.fcmToken,['meeting request',`${requesterDetails?.companyName} has ${status} you a meeting request`,{}]);
   successResponse(res, {
     message: `Meeting request ${status} successfully`,
     meeting: {
@@ -1457,7 +1458,7 @@ const getScans = asyncHandler(async (req, res) => {
     } else {
       // If no exhibitors found, try Visitor
       populatedUsers = await Visitor.find({ _id: { $in: scan.scannedUser } }).lean();
-      userType = populatedUsers.length > 0 ? 'visitor' : '';
+      userType = populatedUsers?.length > 0 ? 'visitor' : '';
     }
 
     populatedUsers[0].userType = userType;

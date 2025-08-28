@@ -267,8 +267,8 @@ const getEvents = asyncHandler(async (req, res) => {
     }
 
     // Filter exhibitors and visitors to include only those with isVerified: true
-    eventObj.exhibitor = eventObj.exhibitor.filter(exhibitor => exhibitor.isVerified === true);
-    eventObj.visitor = eventObj.visitor.filter(visitor => visitor.isVerified === true);
+    // eventObj.exhibitor = eventObj.exhibitor.filter(exhibitor => exhibitor.isVerified === true);
+    // eventObj.visitor = eventObj.visitor.filter(visitor => visitor.isVerified === true);
 
     return eventObj;
   });

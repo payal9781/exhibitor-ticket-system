@@ -28,7 +28,7 @@ const loginApp = Joi.object({
   phone: Joi.string().required(),
   machineId: Joi.string().required(),
   role: Joi.string().valid('exhibitor', 'visitor').required(),
-});
+}).unknown(true);
 
 const forgotPassword = Joi.object({
   email: Joi.string().email().required(),
