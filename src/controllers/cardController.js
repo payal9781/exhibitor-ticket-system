@@ -19,7 +19,17 @@ exports.saveCard = asyncHandler(async (req, res) => {
 exports.updateCard = asyncHandler(async (req, res) => {
     let { id, ...data } = req.body;
     data.userId = req.user.id;
-    let card = await models.ScannedCards.findByIdAndUpdate(id, data);
+
+    let card = await models.ScannedCards.findOneAndUpdate(
+        { _id: new mongoose.Types.ObjectId(id) }, 
+        { $set: { ...data } },
+        { new: true }
+    );
+
+    if (!card) {
+        return res.status(404).json({ message: "Card not found" });
+    }
+
     return successResponse(res, card, 200);
 });
 
