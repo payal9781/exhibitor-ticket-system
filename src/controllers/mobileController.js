@@ -1052,6 +1052,10 @@ const updateMyProfile = asyncHandler(async (req, res) => {
   delete updateData.isDeleted;
   delete updateData._id;
 
+  if (req.file) {
+    updateData.profileImage = req.file.path; 
+  }
+
   let user;
   if (userType === 'exhibitor') {
     user = await Exhibitor.findByIdAndUpdate(userId, updateData, { new: true }).select('-otp -otpExpires');

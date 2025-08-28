@@ -18,6 +18,7 @@ const {
   getExhibitorsWithAttendance
 } = require('../controllers/exhibitorController');
 
+
 router.post('/create', authMiddleware(['organizer', 'superAdmin']), createExhibitor);
 router.post('/list', authMiddleware(['organizer', 'superAdmin']), getExhibitors);
 router.post('/get', authMiddleware(['organizer', 'superAdmin']), getExhibitorById);

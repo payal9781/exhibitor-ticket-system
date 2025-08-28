@@ -11,7 +11,10 @@ const exhibitorSchema = new mongoose.Schema({
   Sector: { type: String },
   keyWords: [{ type: String }],
   website: { type: String },
-  location: { type: String },
+  address: { 
+    city: { type: String },
+    state: { type: String }
+   },
   socialMediaLinks: { type: Object },
   digitalProfile: { type: String, default: "" },
   isActive: { type: Boolean, default: true },
