@@ -2,5 +2,5 @@
 node_modules/
 
 /src/uploads/*
-
+uploads/*
 testing-4b090-firebase-adminsdk-fbsvc-ed05361c31.json
