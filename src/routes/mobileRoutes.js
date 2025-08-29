@@ -22,7 +22,7 @@ const {
   getSchedules,
   getAllMeetings,
   getAllUsersForEvent,
-  getScans
+  getScans,
 } = require('../controllers/mobileController');
 const constants = require('../config/constants');
 
@@ -43,6 +43,7 @@ router.post('/dashboard', authMiddleware(['exhibitor', 'visitor']), getMobileDas
 router.post('/analytics', authMiddleware, getEventAnalytics);
 // Connection and scanning routes
 router.post('/total-connections', authMiddleware(['exhibitor', 'visitor']), getTotalConnections);
+router.post('/total-connections', authMiddleware(['exhibitor', 'visitor']), getEventAnalytics);
 router.post('/event-connections', authMiddleware(['exhibitor', 'visitor']), getEventConnections);
 router.post('/my-registered-events', authMiddleware(['exhibitor', 'visitor']), getMyRegisteredEvents);
 router.post('/attended-events', authMiddleware(['exhibitor', 'visitor']), getAttendedEvents);

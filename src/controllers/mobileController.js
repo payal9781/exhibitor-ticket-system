@@ -43,7 +43,7 @@ const getTotalConnections = asyncHandler(async (req, res) => {
   const totalAcceptedMeetings = await Meeting.countDocuments({
     $or: [
       { requesterId: userId, status: 'accepted' },
-      { recipientId: userId, status: 'accepted' }
+      { requestedId: userId, status: 'accepted' }
     ]
   });
 
@@ -834,7 +834,7 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Meeting not found', 404);
   }
 
-  if (meeting.requestedId.toString() !== userId.toString()) {
+  if (meeting?.requestedId?.toString() !== userId?.toString()) {
     return errorResponse(res, 'You are not authorized to respond to this meeting', 403);
   }
 
@@ -869,14 +869,14 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
     }
   }
   let requesterDetails;
-  if (requesterType === 'exhibitor') {
+  if (meeting?.requesterType === 'exhibitor') {
     requesterDetails = await Exhibitor.findById(meeting.requestedId)
       .select('companyName email phone profileImage fcmToken');
   } else {
     requesterDetails = await Visitor.findById(meeting.requestedId)
       .select('name email phone profileImage companyName fcmToken');
   }
-  await fcmNotification(requesterDetails.fcmToken,['meeting request',`${requesterDetails?.companyName} has ${status} you a meeting request`,{}]);
+  await fcmNotification(requesterDetails?.fcmToken,['meeting request',`${requesterDetails?.companyName} has ${status} you a meeting request`,{}]);
   successResponse(res, {
     message: `Meeting request ${status} successfully`,
     meeting: {
@@ -1324,9 +1324,10 @@ const getAllMeetings = asyncHandler(async (req, res) => {
   console.log('User:', { userId, userType, eventId });
 
   let pendingQuery = {
-    requestedId: userId,
-    requestedType: userType,
-    status: 'pending',
+    $or: [
+      { requestedId: userId, requestedType: userType, status: 'pending' },
+      { requesterId: userId, requesterType: userType, status: 'pending' }
+    ],
     ...(eventId && { eventId })
   };
 
@@ -1339,16 +1340,29 @@ const getAllMeetings = asyncHandler(async (req, res) => {
     ...(eventId && { eventId })
   };
 
-  const [pendingMeetings, confirmedMeetings] = await Promise.all([
+  let rejectedQuery = {
+    $or: [
+      { requesterId: userId, requesterType: userType },
+      { requestedId: userId, requestedType: userType }
+    ],
+    status: 'rejected',
+    ...(eventId && { eventId })
+  };
+
+  const [pendingMeetings, confirmedMeetings, rejectedMeetings] = await Promise.all([
     Meeting.find(pendingQuery)
       .populate('eventId', 'title fromDate toDate location')
       .sort({ createdAt: -1 }),
     Meeting.find(confirmedQuery)
       .populate('eventId', 'title fromDate toDate location')
-      .sort({ slotStart: 1 })
+      .sort({ slotStart: 1 }),
+    Meeting.find(rejectedQuery)
+      .populate('eventId', 'title fromDate toDate location')
+      .sort({ createdAt: -1 })
   ]);
 
   console.log('Pending Meetings:', pendingMeetings);
+  console.log('Rejected Meetings:', rejectedMeetings);
 
   const pendingRequestsWithDetails = await Promise.all(
     pendingMeetings.map(async (request) => {
@@ -1419,6 +1433,48 @@ const getAllMeetings = asyncHandler(async (req, res) => {
     })
   );
 
+  const rejectedMeetingsWithDetails = await Promise.all(
+    rejectedMeetings.map(async (meeting) => {
+      let otherParticipant;
+      let otherParticipantType;
+
+      if (meeting.requesterId.toString() === userId.toString()) {
+        otherParticipantType = meeting.requestedType;
+        if (meeting.requestedType === 'exhibitor') {
+          otherParticipant = await Exhibitor.findById(meeting.requestedId)
+            .select('companyName email phone profileImage bio Sector location');
+        } else {
+          otherParticipant = await Visitor.findById(meeting.requestedId)
+            .select('name email phone profileImage bio Sector location companyName');
+        }
+      } else {
+        otherParticipantType = meeting.requesterType;
+        if (meeting.requesterType === 'exhibitor') {
+          otherParticipant = await Exhibitor.findById(meeting.requesterId)
+            .select('companyName email phone profileImage bio Sector location');
+        } else {
+          otherParticipant = await Visitor.findById(meeting.requesterId)
+            .select('name email phone profileImage bio Sector location companyName');
+        }
+      }
+
+      return {
+        _id: meeting._id,
+        eventId: meeting.eventId?._id || null,
+        eventTitle: meeting.eventId?.title || 'N/A',
+        eventLocation: meeting.eventId?.location || 'N/A',
+        slotStart: meeting.slotStart,
+        slotEnd: meeting.slotEnd,
+        status: meeting.status,
+        createdAt: meeting.createdAt,
+        otherParticipant: otherParticipant || {},
+        otherParticipantType,
+        isRequester: meeting.requesterId.toString() === userId.toString(),
+        canRespond: false
+      };
+    })
+  );
+
   const meetingsByDate = {};
   confirmedMeetingsWithDetails.forEach(meeting => {
     const dateKey = meeting.slotStart.toISOString().split('T')[0];
@@ -1428,11 +1484,22 @@ const getAllMeetings = asyncHandler(async (req, res) => {
     meetingsByDate[dateKey].push(meeting);
   });
 
+  const rejectedMeetingsByDate = {};
+  rejectedMeetingsWithDetails.forEach(meeting => {
+    const dateKey = meeting.slotStart.toISOString().split('T')[0];
+    if (!rejectedMeetingsByDate[dateKey]) {
+      rejectedMeetingsByDate[dateKey] = [];
+    }
+    rejectedMeetingsByDate[dateKey].push(meeting);
+  });
+
   successResponse(res, {
     totalPendingRequests: pendingRequestsWithDetails.length,
     pendingRequests: pendingRequestsWithDetails,
     totalConfirmedMeetings: confirmedMeetingsWithDetails.length,
-    confirmedMeetingsByDate: meetingsByDate
+    confirmedMeetingsByDate: meetingsByDate,
+    totalRejectedMeetings: rejectedMeetingsWithDetails.length,
+    rejectedMeetingsByDate: rejectedMeetingsByDate
   }, 200);
 });
 

@@ -1505,7 +1505,7 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
         $lt: tomorrow
       }
     })
-      .populate('userId', 'name companyName')
+      .populate('userId', 'name companyName phone')
       .populate('eventId', 'title location')
       .sort({ scanTime: -1 });
 
