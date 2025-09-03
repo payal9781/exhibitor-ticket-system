@@ -9,6 +9,7 @@ const UserEventSlot = require('../models/UserEventSlot');
 const { default: mongoose } = require('mongoose');
 const Attendance = require('../models/z-index').models.Attendance;
 const fcmNotification = require('../utils/fcmToken_notification').sendNotification;
+const Notification = require('../models/notification');
 // Get total connections for exhibitor/visitor across all events
 const getTotalConnections = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -744,6 +745,23 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
   userSlot.slots[slotIndex].meetingId = meeting._id;
   await userSlot.save();
 
+  const notification = new Notification({
+    recipientId: requestedId, // Assuming scannedUserId is the recipient
+    recipientType: requestedType,
+    type: 'meeting_request',
+    title: 'New Meeting Request',
+    message: `You have received a meeting request from ${req.user.name || req.user.companyName} for slot starting at ${new Date(slotStart)}.`,
+    data: {
+      meetingId: meeting._id, // Assuming newMeeting is the saved meeting
+      eventId,
+      slotStart: new Date(slotStart),
+    slotEnd: new Date(slotEnd),
+      requesterId: requesterId,
+      requesterType: req.user.type
+    }
+  });
+  await notification.save();
+
   // Get requester details for response
   let requesterDetails;
   if (requesterType === 'exhibitor') {
@@ -868,6 +886,28 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
       await userSlot.save();
     }
   }
+
+  let notifTitle = status === 'confirmed' ? 'Meeting Request Accepted' : 'Meeting Request Rejected';
+  let notifMessage = status === 'confirmed' 
+    ? `Your meeting request has been accepted by ${req.user.name || req.user.companyName}.`
+    : `Your meeting request has been rejected by ${req.user.name || req.user.companyName}.`;
+
+  // Create and save notification for the requester
+  const notification = new Notification({
+    recipientId: meeting.requesterId, // Assuming meeting model has requesterId and requesterType
+    recipientType: meeting.requesterType,
+    type: 'meeting_response',
+    title: notifTitle,
+    message: notifMessage,
+    data: {
+      meetingId: meeting._id,
+      eventId: meeting.eventId,
+      slotId: meeting.slotId,
+      status
+    }
+  });
+  await notification.save();
+
   let requesterDetails;
   if (meeting?.requesterType === 'exhibitor') {
     requesterDetails = await Exhibitor.findById(meeting.requestedId)
@@ -1539,6 +1579,49 @@ const getScans = asyncHandler(async (req, res) => {
   successResponse(res, { scans: populatedScans }, 200);
 });
 
+const getNotifications = asyncHandler(async (req, res) => {
+  const currentUserId = req.user.id;
+  const currentUserType = req.user.type; // Assuming req.user.type is set in authMiddleware as 'exhibitor' or 'visitor'
+
+  const notifications = await Notification.find({
+    recipientId: currentUserId,
+    recipientType: currentUserType
+  }).sort({ createdAt: -1 }).limit(50); // Limit to recent 50 for performance
+
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  successResponse(res, {
+    notifications,
+    unreadCount
+  });
+});
+
+const markNotificationAsRead = asyncHandler(async (req, res) => {
+  const { notificationId } = req.body;
+  const currentUserId = req.user.id;
+  const currentUserType = req.user.type;
+
+  if (!notificationId) {
+    return errorResponse(res, 'Notification ID is required', 400);
+  }
+
+  const notification = await Notification.findOneAndUpdate(
+    {
+      _id: notificationId,
+      recipientId: currentUserId,
+      recipientType: currentUserType
+    },
+    { isRead: true },
+    { new: true }
+  );
+
+  if (!notification) {
+    return errorResponse(res, 'Notification not found or unauthorized', 404);
+  }
+
+  successResponse(res, { message: 'Notification marked as read', notification });
+});
+
 module.exports = {
   getTotalConnections,
   getEventAnalytics,
@@ -1560,5 +1643,7 @@ module.exports = {
   getSchedules,
   getAllUsersForEvent,
   getAllMeetings,
-  getScans
+  getScans,
+  getNotifications,
+   markNotificationAsRead 
 };

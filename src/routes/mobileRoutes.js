@@ -35,6 +35,7 @@ const { getSponsors } = require('../controllers/eventController');
 
 // Import category functionality from category controller
 const { getCategories } = require('../controllers/categoryController');
+const { getNotifications, markNotificationAsRead } = require('../controllers/mobileController');
 
 // Mobile app routes for exhibitors and visitors
 
@@ -78,4 +79,7 @@ router.post('/get-leads', authMiddleware(['exhibitor','visitor']), getLeads);
 router.post('/create-lead', authMiddleware(['exhibitor','visitor']), createLead);
 router.post('/update-lead', authMiddleware(['exhibitor','visitor']), updateLead);
 router.post('/delete-lead', authMiddleware(['exhibitor','visitor']), deleteLead);
+
+router.post('/get-notifications', authMiddleware(['exhibitor', 'visitor']), getNotifications);
+router.post('/mark-notification-read', authMiddleware(['exhibitor', 'visitor']), markNotificationAsRead);
 module.exports = router;
