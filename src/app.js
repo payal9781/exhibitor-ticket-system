@@ -15,7 +15,7 @@ app.use(cors({}));
 app.set('etag', false);
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, '../Uploads')));
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Morgan logging configuration
 if (process.env.NODE_ENV === 'production') {
@@ -50,12 +50,13 @@ app.get('/register/:registrationLink', async (req, res) => {
         error: 'Event not found',
       });
     }
+    // Check if event registration is still valid (before event end date)
     const currentDate = new Date();
-    const eventToDate = new Date(event.toDate);
-    if (currentDate > eventToDate) {
+    const eventEndDate = new Date(event.toDate);
+    if (currentDate > eventEndDate) {
       return res.status(400).render('error', {
         title: 'Registration Closed',
-        message: 'Registration for this event has closed. The event has already started.',
+        message: 'Registration for this event has closed. The event has already ended.',
         error: 'Registration closed',
       });
     }

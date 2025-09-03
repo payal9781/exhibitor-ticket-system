@@ -43,6 +43,7 @@ router.post('/get', authMiddleware(['organizer', 'superAdmin', 'exhibitor', 'vis
 router.post('/update', authMiddleware(['organizer', 'superAdmin']),upload(constants.EVENT_BANNER_PATH).fields([{ name: 'banners', maxCount: 10 }]), updateEvent);
 router.post('/delete', authMiddleware(['organizer', 'superAdmin']), deleteEvent);
 router.post('/register', authMiddleware(['exhibitor', 'visitor', 'organizer', 'superAdmin']), registerForEvent);
+// router.post('/registration/event/:registrationLink/:type', registerByLink);
 router.post('/registration/event/:registrationLink/:type', registerByLink);
 router.post('/stats', authMiddleware(['organizer', 'superAdmin']), getEventStats);
 router.post('/upcoming', authMiddleware(['organizer', 'superAdmin']), getUpcomingEvents);

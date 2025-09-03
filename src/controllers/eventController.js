@@ -299,7 +299,13 @@ const getEventById = asyncHandler(async (req, res) => {
 const updateEvent = asyncHandler(async (req, res) => {
   const { id, schedules, fromDate, toDate, media, ...updateData } = req.body;
 
-  const event = await Event.findById(id);
+  // Handle FormData case where id might be in the body or as a separate field
+  const eventId = id || req.body.id;
+  if (!eventId) {
+    return res.status(400).json({ message: 'Event ID is required' });
+  }
+
+  const event = await Event.findById(eventId);
   if (!event) return res.status(404).json({ message: 'Event not found' });
 
   if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
@@ -307,11 +313,11 @@ const updateEvent = asyncHandler(async (req, res) => {
   }
 
   // Check if event has exhibitors or visitors
-  const hasExhibitors = event.exhibitor && event.exhibitor.length > 0;
-  const hasVisitors = event.visitor && event.visitor.length > 0;
-  if ((hasExhibitors || hasVisitors) && (fromDate || toDate)) {
-    return res.status(400).json({ message: 'Cannot update event dates when exhibitors or visitors are associated' });
-  }
+  // const hasExhibitors = event.exhibitor && event.exhibitor.length > 0;
+  // const hasVisitors = event.visitor && event.visitor.length > 0;
+  // if ((hasExhibitors || hasVisitors) && (fromDate || toDate)) {
+  //   return res.status(400).json({ message: 'Cannot update event dates when exhibitors or visitors are associated' });
+  // }
 
   // Validate schedules
   if (schedules) {
