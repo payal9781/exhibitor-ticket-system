@@ -9,7 +9,7 @@ const app = express();
 const errorMiddleware = require('./middleware/errorMiddleware');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDoc = require('./swagger');
-
+const { sendNotification } = require('./utils/fcmToken_notification');
 // CORS configuration
 app.use(cors({}));
 app.set('etag', false);
@@ -87,6 +87,46 @@ app.get('*', (req, res) => {
 
 // Error middleware
 app.use(errorMiddleware);
+
+
+app.post('/send-notification', async (req, res) => {
+  try {
+    const { fcmToken, title, body, data } = req.body;
+
+    // Validate required fields
+    if (!fcmToken || !title || !body) {
+      return res.status(400).json({
+        message: 'Missing required fields: fcmToken, title, and body are required'
+      });
+    }
+
+    // Prepare messages array for sendNotification function
+    const messages = [title, body, data || {}];
+
+    // Send notification using the provided function
+    const result = await sendNotification(fcmToken, messages);
+
+    // Return response based on notification result
+    if (result.message === 'send successfull') {
+      return res.status(200).json({
+        message: 'Notification sent successfully',
+        data: result.send
+      });
+    } else {
+      return res.status(500).json({
+        message: 'Failed to send notification',
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('Error in send-notification API:', error);
+    return res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 
 // Start the server
 const PORT = process.env.PORT || 9900;

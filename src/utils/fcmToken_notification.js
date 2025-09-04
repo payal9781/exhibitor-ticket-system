@@ -4,13 +4,14 @@ const notification = firebase.notification();
 exports.sendNotification = async (Token, messages) => {
   //messages is an array which has title and body
   let message = {
-    token: Token.toString(),
+    token: Token?.toString(),
     notification: {
       title: messages[0],
       body: messages[1]
     },
     data: messages[2] ? messages[2] : {}
   };
+  console.log('message', message);
   let result = {};
   try {
     const res = await notification.messaging().send(message);

@@ -764,6 +764,7 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
 
   // Get requester details for response
   let requesterDetails;
+  let requestedDetails;
   if (requesterType === 'exhibitor') {
     requesterDetails = await Exhibitor.findById(requesterId)
       .select('companyName email phone profileImage fcmToken');
@@ -772,7 +773,15 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
       .select('name email phone profileImage companyName fcmToken');
   }
 
-  const result = await fcmNotification(requesterDetails.fcmToken,['meeting request',`${requesterDetails?.companyName} has sent you a meeting request`,{}]);
+  if (requestedType === 'exhibitor') {
+    requestedDetails = await Exhibitor.findById(requestedId)
+      .select('companyName email phone profileImage fcmToken');
+  } else {
+    requestedDetails = await Visitor.findById(requestedId)
+      .select('name email phone profileImage companyName fcmToken');
+  }
+
+  const result = await fcmNotification(requestedDetails.fcmToken,['meeting request',`${requestedDetails?.companyName} has sent you a meeting request`,{}]);
   console.log(result);
   successResponse(res, {
     message: 'Meeting request sent successfully',
