@@ -18,7 +18,7 @@ exports.saveCard = asyncHandler(async (req, res) => {
 });
 
 exports.updateCard = asyncHandler(async (req, res) => {
-    let { id, ...data } = req.body;
+    let { id, data } = req.body;
     data.userId = req.user.id;
 
     let card = await models.ScannedCards.findOneAndUpdate(
