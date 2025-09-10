@@ -2,6 +2,7 @@ const asyncHandler = require('express-async-handler');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const { models } = require('./../models/z-index');
 const axios = require('axios');
+const mongoose = require('mongoose');
 
 exports.getCards = asyncHandler(async (req, res) => {
     let cards = await models.ScannedCards.find({ userId: req.user.id });
