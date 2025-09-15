@@ -17,6 +17,9 @@ app.set('etag', false);
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 // Morgan logging configuration
 if (process.env.NODE_ENV === 'production') {
   app.use(morgan('combined'));
