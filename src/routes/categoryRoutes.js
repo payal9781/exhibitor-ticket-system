@@ -7,7 +7,6 @@ const {
   getCategoryById,
   updateCategory,
   deleteCategory,
-  createDefaultCategories,
   reorderCategories
 } = require('../controllers/categoryController');
 
@@ -19,7 +18,6 @@ router.post('/update', authMiddleware(['organizer', 'superAdmin']), updateCatego
 router.post('/delete', authMiddleware(['organizer', 'superAdmin']), deleteCategory);
 
 // Utility routes
-router.post('/create-defaults', authMiddleware(['organizer', 'superAdmin']), createDefaultCategories);
 router.post('/reorder', authMiddleware(['organizer', 'superAdmin']), reorderCategories);
 
 module.exports = router;
