@@ -166,18 +166,54 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
 const login = asyncHandler(async (req, res) => {
   const { role, email, password } = req.body;
-  if (['exhibitor', 'visitor'].includes(role)) return errorResponse(res, 'Use OTP login for exhibitor/visitor', 400);
-  const Model = getModelByRole(role);
-  if (!Model) return errorResponse(res, 'Invalid role');
-  const user = await Model.findOne({ email });
-  if (!user || !(await user.isPasswordCorrect(password))) {
-    return errorResponse(res, 'Invalid credentials', 401);
+
+  // Validate required fields
+  if (!email || !password) {
+    return errorResponse(res, 'Email and password are required', 400);
   }
+
+  if (!role) {
+    return errorResponse(res, 'Role is required', 400);
+  }
+
+  // Check if role is valid for email/password login
+  if (['exhibitor', 'visitor'].includes(role)) {
+    return errorResponse(res, 'Use OTP login for exhibitor/visitor', 400);
+  }
+
+  const Model = getModelByRole(role);
+  if (!Model) {
+    return errorResponse(res, 'Invalid role specified', 400);
+  }
+
+  // Find user by email
+  const user = await Model.findOne({ email });
+  
+  // Don't reveal if email exists or not for security
+  // Return generic error to prevent user enumeration attacks
+  if (!user) {
+    return errorResponse(res, 'Invalid email or password', 401);
+  }
+
+  // Check if user is active
+  if (user.isActive === false) {
+    return errorResponse(res, 'Your account has been deactivated. Please contact support.', 403);
+  }
+
+  // Verify password
+  const isPasswordValid = await user.isPasswordCorrect(password);
+  if (!isPasswordValid) {
+    return errorResponse(res, 'Invalid email or password', 401);
+  }
+
+  // Generate token
   const token = user.generateAccessToken();
-  // Add role to user response
+  
+  // Prepare user response
   const userResponse = user.toObject();
   delete userResponse.password;
   userResponse.role = role;
+  
   successResponse(res, { user: userResponse, token });
 });
 
