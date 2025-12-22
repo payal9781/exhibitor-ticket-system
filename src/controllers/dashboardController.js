@@ -445,12 +445,18 @@ const getRecentActivity = asyncHandler(async (req, res) => {
   }
   const { startDate, endDate, organizerId } = filters;
   
+  // For organizer users, automatically filter by their organizerId
+  let finalOrganizerId = organizerId;
+  if (req.user.type === 'organizer' && req.user.id) {
+    finalOrganizerId = req.user.id;
+  }
+  
   const activities = [];
   
   // Build event query
   let eventQuery = { isDeleted: false };
-  if (organizerId) {
-    eventQuery.organizerId = organizerId;
+  if (finalOrganizerId) {
+    eventQuery.organizerId = finalOrganizerId;
   }
   if (startDate || endDate) {
     eventQuery.updatedAt = {};
@@ -499,15 +505,18 @@ const getRecentActivity = asyncHandler(async (req, res) => {
     .limit(5)
     .select('name createdAt');
   
-  // Format activities
+  // Format activities - only show creation activities, not updates
   recentEvents.forEach(event => {
     const isNew = event.createdAt.getTime() === event.updatedAt.getTime();
-    activities.push({
-      action: isNew ? `New event "${event.title}" was created` : `Event "${event.title}" was updated`,
-      time: getTimeAgo(event.updatedAt),
-      timestamp: event.updatedAt,
-      type: 'event'
-    });
+    // Only add activity if it's a new event, not an update
+    if (isNew) {
+      activities.push({
+        action: `New event "${event.title}" was created`,
+        time: getTimeAgo(event.createdAt),
+        timestamp: event.createdAt,
+        type: 'event'
+      });
+    }
   });
   
   recentExhibitors.forEach(exhibitor => {
@@ -528,10 +537,10 @@ const getRecentActivity = asyncHandler(async (req, res) => {
     });
   });
   
-  // Sort by timestamp and limit to 10
+  // Sort by timestamp and limit to 5
   activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   
-  successResponse(res, activities.slice(0, 10));
+  successResponse(res, activities.slice(0, 5));
 });
 
 // Helper function to calculate time ago
