@@ -136,6 +136,35 @@ const updateOrganizer = asyncHandler(async (req, res) => {
   successResponse(res, response);
 });
 
+const toggleOrganizerStatus = asyncHandler(async (req, res) => {
+  const { id } = req.body;
+
+  if (!id) {
+    return errorResponse(res, 'Organizer ID is required', 400);
+  }
+
+  const organizer = await Organizer.findById(id);
+  if (!organizer) {
+    return errorResponse(res, 'Organizer not found', 404);
+  }
+
+  if (req.user.type === 'organizer' && organizer._id.toString() !== req.user.id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  // Toggle the isActive status
+  organizer.isActive = !organizer.isActive;
+  await organizer.save();
+
+  const response = {
+    ...organizer.toObject(),
+    firstName: organizer.name.split(' ')[0] || '',
+    lastName: organizer.name.split(' ')[1] || ''
+  };
+
+  successResponse(res, response);
+});
+
 const deleteOrganizer = asyncHandler(async (req, res) => {
   const { id } = req.body;
 
@@ -226,11 +255,12 @@ const getOrganizerById = asyncHandler(async (req, res) => {
   successResponse(res, response);
 });
 
-module.exports = { 
-  createOrganizer, 
-  getOrganizers, 
-  getOrganizerById, 
-  updateOrganizer, 
+module.exports = {
+  createOrganizer,
+  getOrganizers,
+  getOrganizerById,
+  updateOrganizer,
+  toggleOrganizerStatus,
   deleteOrganizer,
   getOrganizerStats
 };

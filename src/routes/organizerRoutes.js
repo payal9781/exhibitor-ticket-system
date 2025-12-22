@@ -7,13 +7,15 @@ const {
   getOrganizerById, 
   updateOrganizer, 
   deleteOrganizer,
-  getOrganizerStats
+  getOrganizerStats,
+  toggleOrganizerStatus
 } = require('../controllers/organizerController');
 
 router.post('/create', authMiddleware(['superAdmin']), createOrganizer);
 router.post('/list', authMiddleware(['superAdmin']), getOrganizers);
 router.post('/get', authMiddleware(['superAdmin']), getOrganizerById);
 router.post('/update', authMiddleware(['superAdmin']), updateOrganizer);
+router.post('/toggle-status', authMiddleware(['superAdmin']), toggleOrganizerStatus);
 router.post('/delete', authMiddleware(['superAdmin']), deleteOrganizer);
 router.post('/stats', authMiddleware(['superAdmin']), getOrganizerStats);
 
