@@ -10,6 +10,13 @@ const generateSlots = require('../utils/slotGenerator');
 
 const createVisitor = asyncHandler(async (req, res) => {
   const { eventId, ...visitorData } = req.body;
+  
+  // Log for debugging - remove eventId from logs if it's not set
+  console.log('Create visitor request:', {
+    ...visitorData,
+    eventId: eventId || 'NOT PROVIDED',
+    hasEventId: !!eventId && eventId !== 'none'
+  });
   let visitor;
   let isNewVisitor = false;
 
@@ -192,14 +199,19 @@ const createVisitor = asyncHandler(async (req, res) => {
 });
 
 const getVisitors = asyncHandler(async (req, res) => {
-  const { search, status, page = 1, limit = 10, organizerId } = req.body;
+  const { search, status, page = 1, limit = 1000, organizerId } = req.body; // Increased default limit to 1000
   const userRole = req.user.type;
   const currentUserId = req.user.id;
 
   let visitors;
   let total;
 
-  // If organizer is requesting, filter by their events only
+  // Build base query - show all visitors (not just those who attended events)
+  let query = { isDeleted: false };
+
+  // If organizer is requesting, they can see all visitors (not just from their events)
+  // If you want to restrict organizers to only see visitors from their events, uncomment the code below
+  /*
   if (userRole === 'organizer' || organizerId) {
     const targetOrganizerId = organizerId || currentUserId;
 
@@ -211,88 +223,10 @@ const getVisitors = asyncHandler(async (req, res) => {
 
     const eventIds = organizerEvents.map(event => event._id);
 
-    // Find visitors who have attended these events and are verified
+    // Find visitors who have attended these events
     const attendedVisitors = await Event.aggregate([
       { $match: { _id: { $in: eventIds } } },
       { $unwind: '$visitor' },
-      { $match: { 'visitor.isVerified': true } }, // Filter for verified visitors
-      { $group: { _id: '$visitor.userId' } }
-    ]);
-
-    const visitorIds = attendedVisitors.map(item => item._id);
-
-    if (visitorIds.length === 0) {
-      return res.status(200).json({
-        visitors: [],
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: 0,
-          totalItems: 0,
-          itemsPerPage: parseInt(limit)
-        }
-      });
-    }
-
-    let query = {
-      _id: { $in: visitorIds },
-      isDeleted: false
-    };
-
-    // Filter by status
-    if (status && status !== 'all') {
-      query.isActive = status === 'active';
-    }
-    // If status is 'all' or not provided, don't filter by isActive (show both active and inactive)
-
-    // Add search functionality
-    if (search && search.trim()) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { companyName: { $regex: search, $options: 'i' } },
-        { Sector: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { bio: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Calculate pagination
-    const skip = (page - 1) * limit;
-    total = await Visitor.countDocuments(query);
-
-    visitors = await Visitor.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-  } else {
-    // SuperAdmin can see all verified visitors
-    let query = { isDeleted: false };
-
-    // Filter by status
-    if (status && status !== 'all') {
-      query.isActive = status === 'active';
-    }
-    // If status is 'all' or not provided, don't filter by isActive (show both active and inactive)
-
-    // Add search functionality
-    if (search && search.trim()) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { companyName: { $regex: search, $options: 'i' } },
-        { Sector: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { bio: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Find events with verified visitors
-    const attendedVisitors = await Event.aggregate([
-      { $unwind: '$visitor' },
-      { $match: { 'visitor.isVerified': true } },
       { $group: { _id: '$visitor.userId' } }
     ]);
 
@@ -311,16 +245,36 @@ const getVisitors = asyncHandler(async (req, res) => {
         }
       });
     }
-
-    // Calculate pagination
-    const skip = (page - 1) * limit;
-    total = await Visitor.countDocuments(query);
-
-    visitors = await Visitor.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
   }
+  */
+
+  // Filter by status
+  if (status && status !== 'all') {
+    query.isActive = status === 'active';
+  }
+  // If status is 'all' or not provided, don't filter by isActive (show both active and inactive)
+
+  // Add search functionality
+  if (search && search.trim()) {
+    query.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+      { companyName: { $regex: search, $options: 'i' } },
+      { Sector: { $regex: search, $options: 'i' } },
+      { location: { $regex: search, $options: 'i' } },
+      { bio: { $regex: search, $options: 'i' } }
+    ];
+  }
+
+  // Calculate pagination
+  const skip = (page - 1) * limit;
+  total = await Visitor.countDocuments(query);
+
+  visitors = await Visitor.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit));
 
   const response = {
     visitors,
@@ -343,10 +297,132 @@ const getVisitorById = asyncHandler(async (req, res) => {
 });
 
 const updateVisitor = asyncHandler(async (req, res) => {
-  const { id, ...updateData } = req.body; // Changed from params to body
-  const visitor = await Visitor.findByIdAndUpdate(id, updateData, { new: true });
+  const { id, eventId, ...updateData } = req.body; // Extract eventId separately
+  const visitor = await Visitor.findById(id);
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
-  successResponse(res, visitor);
+
+  // Update visitor data (excluding eventId)
+  Object.keys(updateData).forEach(key => {
+    if (updateData[key] !== undefined && key !== 'keyWords') {
+      visitor[key] = updateData[key];
+    }
+  });
+  if (updateData.keyWords !== undefined) {
+    visitor.keyWords = updateData.keyWords;
+  }
+
+  await visitor.save();
+
+  let qrCode = null;
+  let event = null;
+  // Handle event enrollment if eventId is provided
+  if (eventId && eventId !== 'none') {
+    event = await Event.findById(eventId);
+    if (!event) {
+      return errorResponse(res, 'Event not found', 404);
+    }
+    if (!event.isActive) {
+      return errorResponse(res, 'Cannot add visitor to inactive event', 400);
+    }
+    if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+      return errorResponse(res, 'Access denied', 403);
+    }
+
+    const currentDate = new Date();
+    const eventEndDate = new Date(event.toDate);
+    if (currentDate > eventEndDate) {
+      return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
+    }
+
+    const existingVisitor = event.visitor.find(ex => ex.userId.toString() === visitor._id.toString());
+    if (existingVisitor) {
+      return successResponse(res, {
+        message: 'Visitor updated successfully. Visitor is already registered for this event',
+        visitor: {
+          _id: visitor._id,
+          name: visitor.name,
+          email: visitor.email,
+          phone: visitor.phone
+        },
+        alreadyRegistered: true,
+        qrCode: existingVisitor.qrCode,
+        event: {
+          _id: event._id,
+          title: event.title,
+          fromDate: event.fromDate,
+          toDate: event.toDate
+        }
+      });
+    }
+
+    const qrData = {
+      eventId: event._id,
+      userId: visitor._id,
+      userType: 'visitor',
+      startDate: event.fromDate,
+      endDate: event.toDate,
+      eventTitle: event.title
+    };
+    qrCode = await require('../utils/qrGenerator')(qrData);
+
+    event.visitor.push({
+      userId: visitor._id,
+      qrCode,
+      registeredAt: new Date()
+    });
+
+    try {
+      const existingSlots = await UserEventSlot.findOne({
+        userId: visitor._id,
+        userType: 'visitor',
+        eventId
+      });
+
+      if (!existingSlots) {
+        const rawSlots = generateSlots(
+          event.fromDate,
+          event.toDate,
+          event.meetingStartTime || event.startTime,
+          event.meetingEndTime || event.endTime,
+          event.timeInterval || 30
+        );
+        const slots = rawSlots.map(s => ({
+          start: s.start,
+          end: s.end,
+          status: 'available',
+          showSlots: false
+        }));
+        const userSlot = new UserEventSlot({
+          userId: visitor._id,
+          userType: 'visitor',
+          eventId,
+          slots
+        });
+        await userSlot.save();
+      }
+    } catch (slotError) {
+      console.error('Error generating slots:', slotError);
+    }
+
+    await event.save();
+  }
+
+  successResponse(res, {
+    message: 'Visitor updated successfully',
+    visitor: {
+      _id: visitor._id,
+      name: visitor.name,
+      email: visitor.email,
+      phone: visitor.phone
+    },
+    qrCode,
+    event: event ? {
+      _id: event._id,
+      title: event.title,
+      fromDate: event.fromDate,
+      toDate: event.toDate
+    } : null
+  });
 });
 
 const deleteVisitor = asyncHandler(async (req, res) => {
@@ -354,18 +430,25 @@ const deleteVisitor = asyncHandler(async (req, res) => {
   const visitor = await Visitor.findById(id);
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
 
-  // Check if visitor is associated with any active event
-  const eventWithVisitor = await Event.findOne({
-    'visitor.userId': id,
+  // Check if visitor is enrolled in any event (not deleted)
+  // Find all non-deleted events and check if any contain this visitor
+  const events = await Event.find({
+    isDeleted: false
+  }).select('_id title visitor');
+
+  // Check if visitor is in any event's visitor array
+  const eventsWithVisitor = events.filter(event => {
+    return event.visitor && event.visitor.some(v => v.userId && v.userId.toString() === id);
   });
 
-  if (eventWithVisitor) {
-    return errorResponse(res, 'Cannot delete visitor associated with an active event', 400);
+  if (eventsWithVisitor.length > 0) {
+    const eventTitles = eventsWithVisitor.map(e => e.title).join(', ');
+    return errorResponse(res, `Cannot delete visitor. Visitor is enrolled in ${eventsWithVisitor.length} event(s): "${eventTitles}". Please remove the visitor from the event(s) first.`, 400);
   }
 
   visitor.isDeleted = true;
   await visitor.save();
-  successResponse(res, { message: 'Visitor deleted' });
+  successResponse(res, { message: 'Visitor deleted successfully' });
 });
 
 const getOrganizersEventWise = asyncHandler(async (req, res) => {
