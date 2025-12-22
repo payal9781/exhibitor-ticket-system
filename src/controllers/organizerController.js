@@ -58,7 +58,7 @@ const createOrganizer = asyncHandler(async (req, res) => {
 });
 
 const updateOrganizer = asyncHandler(async (req, res) => {
-  const { id, firstName, lastName, company, password, phone, ...rest } = req.body;
+  const { id, firstName, lastName, company, password, phone, email, ...rest } = req.body;
 
   if (!id) {
     return errorResponse(res, 'Organizer ID is required', 400);
@@ -110,19 +110,29 @@ const updateOrganizer = asyncHandler(async (req, res) => {
     }
   }
 
+  // Build extraDetails object, ensuring socialMedia and businessInfo are always objects
+  const existingExtraDetails = organizer.extraDetails || {};
+  const requestExtraDetails = rest.extraDetails || {};
+  
+  const extraDetails = {
+    website: requestExtraDetails.website !== undefined ? requestExtraDetails.website : existingExtraDetails.website,
+    description: requestExtraDetails.description !== undefined ? requestExtraDetails.description : existingExtraDetails.description,
+    notes: requestExtraDetails.notes !== undefined ? requestExtraDetails.notes : existingExtraDetails.notes,
+    tags: requestExtraDetails.tags !== undefined ? requestExtraDetails.tags : (existingExtraDetails.tags || []),
+    // Always ensure socialMedia and businessInfo are objects, never undefined
+    socialMedia: requestExtraDetails.socialMedia !== undefined 
+      ? (requestExtraDetails.socialMedia || {}) 
+      : (existingExtraDetails.socialMedia || {}),
+    businessInfo: requestExtraDetails.businessInfo !== undefined 
+      ? (requestExtraDetails.businessInfo || {}) 
+      : (existingExtraDetails.businessInfo || {})
+  };
+
   Object.assign(organizer, {
     email: email || organizer.email,
     phone: phone || organizer.phone,
     address: rest.address || organizer.address,
-    extraDetails: {
-      ...organizer.extraDetails,
-      website: rest.website ?? organizer.extraDetails.website,
-      description: rest.description ?? organizer.extraDetails.description,
-      socialMedia: rest.socialMedia || organizer.extraDetails.socialMedia,
-      businessInfo: rest.businessInfo || organizer.extraDetails.businessInfo,
-      notes: rest.notes ?? organizer.extraDetails.notes,
-      tags: rest.tags || organizer.extraDetails.tags
-    }
+    extraDetails: extraDetails
   });
 
   await organizer.save();
