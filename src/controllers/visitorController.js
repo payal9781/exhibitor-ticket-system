@@ -241,9 +241,8 @@ const getVisitors = asyncHandler(async (req, res) => {
     // Filter by status
     if (status && status !== 'all') {
       query.isActive = status === 'active';
-    } else {
-      query.isActive = true;
     }
+    // If status is 'all' or not provided, don't filter by isActive (show both active and inactive)
 
     // Add search functionality
     if (search && search.trim()) {
@@ -274,9 +273,8 @@ const getVisitors = asyncHandler(async (req, res) => {
     // Filter by status
     if (status && status !== 'all') {
       query.isActive = status === 'active';
-    } else {
-      query.isActive = true;
     }
+    // If status is 'all' or not provided, don't filter by isActive (show both active and inactive)
 
     // Add search functionality
     if (search && search.trim()) {

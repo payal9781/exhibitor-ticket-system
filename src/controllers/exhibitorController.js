@@ -240,12 +240,11 @@ const getExhibitors = asyncHandler(async (req, res) => {
       isDeleted: false
     };
 
-    // Filter by status
+    // Filter by status - only filter if status is explicitly provided and not 'all'
     if (status && status !== 'all') {
       query.isActive = status === 'active';
-    } else {
-      query.isActive = true;
     }
+    // If status is 'all' or not provided, show both active and inactive (don't filter by isActive)
 
     // Add search functionality
     if (search && search.trim()) {
@@ -273,12 +272,11 @@ const getExhibitors = asyncHandler(async (req, res) => {
     // SuperAdmin can see all verified exhibitors
     let query = { isDeleted: false };
 
-    // Filter by status
+    // Filter by status - only filter if status is explicitly provided and not 'all'
     if (status && status !== 'all') {
       query.isActive = status === 'active';
-    } else {
-      query.isActive = true;
     }
+    // If status is 'all' or not provided, show both active and inactive (don't filter by isActive)
 
     // Add search functionality
     if (search && search.trim()) {
