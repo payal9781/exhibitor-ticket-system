@@ -208,7 +208,7 @@ const createVisitor = asyncHandler(async (req, res) => {
 });
 
 const getVisitors = asyncHandler(async (req, res) => {
-  const { search, status, page = 1, limit = 1000, organizerId } = req.body; // Increased default limit to 1000
+  const { search, status, page = 1, limit = 1000, organizerId, eventId } = req.body; // Increased default limit to 1000
   const userRole = req.user.type;
   const currentUserId = req.user.id;
 
@@ -217,6 +217,41 @@ const getVisitors = asyncHandler(async (req, res) => {
 
   // Build base query - show all visitors (not just those who attended events)
   let query = { isDeleted: false };
+
+  // Filter by eventId if provided
+  if (eventId && eventId !== 'all') {
+    // Find the event
+    const event = await Event.findById(eventId);
+    if (!event) {
+      return res.status(200).json({
+        visitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+
+    // Get visitor IDs from the event's visitor array
+    const visitorIds = event.visitor.map(v => v.userId);
+
+    if (visitorIds.length > 0) {
+      query._id = { $in: visitorIds };
+    } else {
+      // No visitors registered for this event
+      return res.status(200).json({
+        visitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+  }
 
   // If organizer is requesting, they can see all visitors (not just from their events)
   // If you want to restrict organizers to only see visitors from their events, uncomment the code below
