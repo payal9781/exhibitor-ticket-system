@@ -195,6 +195,64 @@ const deleteUser = asyncHandler(async (req, res) => {
   return response.success(`${role} deleted successfully`, {}, res);
 });
 
+// Helper function to split name into firstName and lastName
+const splitName = (name) => {
+  if (!name) return { firstName: '', lastName: '' };
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: '' };
+  }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(' ')
+  };
+};
+
+// Transform user data to match frontend format
+const transformUser = (user, role) => {
+  const { name, _id, ...rest } = user;
+  const { firstName, lastName } = splitName(name);
+  
+  const transformed = {
+    id: _id.toString(),
+    firstName,
+    lastName,
+    email: user.email || '',
+    role,
+    status: user.isActive ? 'active' : 'inactive',
+    createdAt: user.createdAt || new Date(),
+    lastLogin: user.lastLogin || null,
+    notes: user.notes || ''
+  };
+
+  // Add role-specific data
+  if (role === 'organizer') {
+    transformed.organizerData = {
+      company: user.company || user.organizationName || '',
+      phone: user.phone || '',
+      website: user.extraDetails?.website || '',
+      subscription: user.subscription || 'basic'
+    };
+  } else if (role === 'exhibitor') {
+    transformed.exhibitorData = {
+      companyName: user.companyName || '',
+      industry: user.Sector || '',
+      contactName: '',
+      phone: user.phone || '',
+      website: user.website || ''
+    };
+  } else if (role === 'visitor') {
+    transformed.visitorData = {
+      jobTitle: user.jobTitle || '',
+      company: user.companyName || '',
+      phone: user.phone || '',
+      interests: user.keyWords || []
+    };
+  }
+
+  return transformed;
+};
+
 // Get all users for user management
 const getUsers = asyncHandler(async (req, res) => {
   const { role, status, search } = req.body;
@@ -207,7 +265,9 @@ const getUsers = asyncHandler(async (req, res) => {
   if (search) {
     query.$or = [
       { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
+      { email: { $regex: search, $options: 'i' } },
+      { companyName: { $regex: search, $options: 'i' } },
+      { organizationName: { $regex: search, $options: 'i' } }
     ];
   }
 
@@ -215,7 +275,8 @@ const getUsers = asyncHandler(async (req, res) => {
   if (role && role !== 'all') {
     const Model = models[role.charAt(0).toUpperCase() + role.slice(1)];
     if (Model) {
-      users = await Model.find(query);
+      const rawUsers = await Model.find(query);
+      users = rawUsers.map(u => transformUser(u.toObject(), role));
     }
   } else {
     // Get users from all models
@@ -224,9 +285,9 @@ const getUsers = asyncHandler(async (req, res) => {
     const organizers = await models.Organizer.find(query);
     
     users = [
-      ...exhibitors.map(u => ({ ...u.toObject(), role: 'exhibitor' })),
-      ...visitors.map(u => ({ ...u.toObject(), role: 'visitor' })),
-      ...organizers.map(u => ({ ...u.toObject(), role: 'organizer' }))
+      ...exhibitors.map(u => transformUser(u.toObject(), 'exhibitor')),
+      ...visitors.map(u => transformUser(u.toObject(), 'visitor')),
+      ...organizers.map(u => transformUser(u.toObject(), 'organizer'))
     ];
   }
 
@@ -268,9 +329,45 @@ const getUserStats = asyncHandler(async (req, res) => {
   const totalOrganizers = await models.Organizer.countDocuments({ isDeleted: false });
   const activeOrganizers = await models.Organizer.countDocuments({ isDeleted: false, isActive: true });
 
+  const total = totalExhibitors + totalVisitors + totalOrganizers;
+  const activeUsers = activeExhibitors + activeVisitors + activeOrganizers;
+
+  // Calculate recently active (users who logged in within last 7 days)
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  
+  // For now, we'll use active users as recently active since we don't track lastLogin
+  const recentlyActive = activeUsers;
+
+  // Calculate new users this month
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+  
+  const newExhibitors = await models.Exhibitor.countDocuments({ 
+    isDeleted: false, 
+    createdAt: { $gte: startOfMonth } 
+  });
+  const newVisitors = await models.Visitor.countDocuments({ 
+    isDeleted: false, 
+    createdAt: { $gte: startOfMonth } 
+  });
+  const newOrganizers = await models.Organizer.countDocuments({ 
+    isDeleted: false, 
+    createdAt: { $gte: startOfMonth } 
+  });
+  const newThisMonth = newExhibitors + newVisitors + newOrganizers;
+
   const stats = {
-    totalUsers: totalExhibitors + totalVisitors + totalOrganizers,
-    activeUsers: activeExhibitors + activeVisitors + activeOrganizers,
+    total,
+    byStatus: {
+      active: activeUsers,
+      inactive: total - activeUsers,
+      suspended: 0,
+      pending: 0
+    },
+    recentlyActive,
+    newThisMonth,
     totalExhibitors,
     activeExhibitors,
     totalVisitors,

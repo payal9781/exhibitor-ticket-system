@@ -17,70 +17,79 @@ const createVisitor = asyncHandler(async (req, res) => {
     eventId: eventId || 'NOT PROVIDED',
     hasEventId: !!eventId && eventId !== 'none'
   });
-  let visitor;
-  let isNewVisitor = false;
+  
+  let existingVisitor = null;
+  let duplicateField = '';
 
+  // Check for duplicate phone number
   if (visitorData.phone) {
-    visitor = await Visitor.findOne({
+    existingVisitor = await Visitor.findOne({
       phone: visitorData.phone,
       isDeleted: false
     });
+    if (existingVisitor) {
+      duplicateField = 'mobile number';
+    }
   }
 
-  if (!visitor && visitorData.email) {
-    visitor = await Visitor.findOne({
+  // Check for duplicate email if phone not found
+  if (!existingVisitor && visitorData.email) {
+    existingVisitor = await Visitor.findOne({
       email: visitorData.email,
       isDeleted: false
     });
+    if (existingVisitor) {
+      duplicateField = 'email';
+    }
   }
 
-  if (visitor) {
-    Object.keys(visitorData).forEach(key => {
-      if (visitorData[key] && visitorData[key] !== '' && key !== 'keyWords') {
-        visitor[key] = visitorData[key];
-      }
-    });
-    if (visitorData.keyWords) {
-      visitor.keyWords = visitorData.keyWords;
-    }
-  } else {
-    if (visitorData.email) {
-      const deletedVisitor = await Visitor.findOne({
-        email: visitorData.email,
-        isDeleted: true
-      });
-      if (deletedVisitor) {
-        return errorResponse(res, 'Contact administrator', 409);
-      }
-    }
-    visitor = new Visitor({
-      ...visitorData,
-      isActive: true
-    });
+  // Return error if visitor already exists (DO NOT UPDATE)
+  if (existingVisitor) {
+    const fieldMessage = duplicateField === 'mobile number' 
+      ? `A visitor with this mobile number (${visitorData.phone}) already exists. Please use the edit option to update the visitor.`
+      : `A visitor with this email (${visitorData.email}) already exists. Please use the edit option to update the visitor.`;
+    
+    return errorResponse(res, fieldMessage, 409);
+  }
 
-    try {
-      const payload = {
-        name: String(visitor.name || '').trim(),
-        email: visitor.email || '',
-        mobile: visitor.phone,
-        businessKeyword: 'Event Visitor',
-        originId: '67ca6934c15747af04fff36c',
-        countryCode: '91'
-      };
-      const DIGITAL_CARD_URL = 'https://digitalcard.co.in/web/create-account/mobile';
-      const result = await axios.post(DIGITAL_CARD_URL, payload, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (result.data?.data?.path) {
-        visitor.digitalProfile = result.data.data.path;
-      } else {
-        console.log(`Something went wrong while creating digital card: ${JSON.stringify(result.data)}`);
-      }
-    } catch (err) {
-      console.log(`Error in creating digital card: ${err}`);
+  // Check for deleted visitor with same email
+  if (visitorData.email) {
+    const deletedVisitor = await Visitor.findOne({
+      email: visitorData.email,
+      isDeleted: true
+    });
+    if (deletedVisitor) {
+      return errorResponse(res, 'Contact administrator', 409);
     }
+  }
 
-    isNewVisitor = true;
+  // Create new visitor (only if no duplicate found)
+  const visitor = new Visitor({
+    ...visitorData,
+    isActive: true
+  });
+
+  // Create digital card profile
+  try {
+    const payload = {
+      name: String(visitor.name || '').trim(),
+      email: visitor.email || '',
+      mobile: visitor.phone,
+      businessKeyword: 'Event Visitor',
+      originId: '67ca6934c15747af04fff36c',
+      countryCode: '91'
+    };
+    const DIGITAL_CARD_URL = 'https://digitalcard.co.in/web/create-account/mobile';
+    const result = await axios.post(DIGITAL_CARD_URL, payload, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (result.data?.data?.path) {
+      visitor.digitalProfile = result.data.data.path;
+    } else {
+      console.log(`Something went wrong while creating digital card: ${JSON.stringify(result.data)}`);
+    }
+  } catch (err) {
+    console.log(`Error in creating digital card: ${err}`);
   }
 
   await visitor.save();
@@ -105,19 +114,19 @@ const createVisitor = asyncHandler(async (req, res) => {
       return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
     }
 
-    const existingVisitor = event.visitor.find(ex => ex.userId.toString() === visitor._id.toString());
-    if (existingVisitor) {
+    const existingVisitorInEvent = event.visitor.find(ex => ex.userId.toString() === visitor._id.toString());
+    if (existingVisitorInEvent) {
       return successResponse(res, {
-        message: 'Visitor is already registered for this event',
+        message: 'Visitor created successfully. Visitor is already registered for this event',
         visitor: {
           _id: visitor._id,
           name: visitor.name,
           email: visitor.email,
           phone: visitor.phone
         },
-        isNewVisitor,
+        isNewVisitor: true,
         alreadyRegistered: true,
-        qrCode: existingVisitor.qrCode,
+        qrCode: existingVisitorInEvent.qrCode,
         event: {
           _id: event._id,
           title: event.title,
@@ -180,14 +189,14 @@ const createVisitor = asyncHandler(async (req, res) => {
   }
 
   successResponse(res, {
-    message: isNewVisitor ? 'Visitor created successfully' : 'Visitor updated successfully',
+    message: 'Visitor created successfully',
     visitor: {
       _id: visitor._id,
       name: visitor.name,
       email: visitor.email,
       phone: visitor.phone
     },
-    isNewVisitor,
+    isNewVisitor: true,
     qrCode,
     event: event ? {
       _id: event._id,
@@ -195,7 +204,7 @@ const createVisitor = asyncHandler(async (req, res) => {
       fromDate: event.fromDate,
       toDate: event.toDate
     } : null
-  }, isNewVisitor ? 201 : 200);
+  }, 201);
 });
 
 const getVisitors = asyncHandler(async (req, res) => {
