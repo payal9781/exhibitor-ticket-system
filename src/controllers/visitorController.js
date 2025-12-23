@@ -234,6 +234,19 @@ const getVisitors = asyncHandler(async (req, res) => {
       });
     }
 
+    // Check access control: Organizer can only access their own events
+    if (userRole === 'organizer' && event.organizerId.toString() !== currentUserId) {
+      return res.status(200).json({
+        visitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+
     // Get visitor IDs from the event's visitor array
     const visitorIds = event.visitor.map(v => v.userId);
 
@@ -251,46 +264,58 @@ const getVisitors = asyncHandler(async (req, res) => {
         }
       });
     }
-  }
+  } else {
+    // If organizer is requesting (and no specific eventId), filter by their events only
+    if (userRole === 'organizer') {
+      const targetOrganizerId = organizerId || currentUserId;
 
-  // If organizer is requesting, they can see all visitors (not just from their events)
-  // If you want to restrict organizers to only see visitors from their events, uncomment the code below
-  /*
-  if (userRole === 'organizer' || organizerId) {
-    const targetOrganizerId = organizerId || currentUserId;
+      // Get all events organized by this organizer
+      const organizerEvents = await Event.find({
+        organizerId: targetOrganizerId,
+        isDeleted: false
+      }).select('_id visitor');
 
-    // Get all events organized by this organizer
-    const organizerEvents = await Event.find({
-      organizerId: targetOrganizerId,
-      isDeleted: false
-    }).select('_id visitor');
+      const eventIds = organizerEvents.map(event => event._id);
 
-    const eventIds = organizerEvents.map(event => event._id);
+      if (eventIds.length === 0) {
+        // No events found for this organizer
+        return res.status(200).json({
+          visitors: [],
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: 0,
+            totalItems: 0,
+            itemsPerPage: parseInt(limit)
+          }
+        });
+      }
 
-    // Find visitors who have attended these events
-    const attendedVisitors = await Event.aggregate([
-      { $match: { _id: { $in: eventIds } } },
-      { $unwind: '$visitor' },
-      { $group: { _id: '$visitor.userId' } }
-    ]);
+      // Find visitors who have attended these events
+      const attendedVisitors = await Event.aggregate([
+        { $match: { _id: { $in: eventIds } } },
+        { $unwind: '$visitor' },
+        { $group: { _id: '$visitor.userId' } }
+      ]);
 
-    const visitorIds = attendedVisitors.map(item => item._id);
+      const visitorIds = attendedVisitors.map(item => item._id);
 
-    if (visitorIds.length > 0) {
-      query._id = { $in: visitorIds };
-    } else {
-      return res.status(200).json({
-        visitors: [],
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: 0,
-          totalItems: 0,
-          itemsPerPage: parseInt(limit)
-        }
-      });
+      if (visitorIds.length > 0) {
+        query._id = { $in: visitorIds };
+      } else {
+        // No visitors found in organizer's events
+        return res.status(200).json({
+          visitors: [],
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: 0,
+            totalItems: 0,
+            itemsPerPage: parseInt(limit)
+          }
+        });
+      }
     }
+    // Super Admin can see all visitors (no additional filtering needed)
   }
-  */
 
   // Filter by status
   if (status && status !== 'all') {
