@@ -437,7 +437,13 @@ const resetPassword = asyncHandler(async (req, res) => {
   }
   
   // Generate a temporary password (in real implementation, send email)
-  const tempPassword = Math.random().toString(36).slice(-8);
+  // Ensure it's at least 8 characters long to meet validation requirements
+  // Generate a 12-character password with alphanumeric characters
+  const tempPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6).toUpperCase();
+  
+  // Set the password - the pre-save hook will hash it automatically
+  user.password = tempPassword;
+  await user.save();
   
   return response.success('Password reset successfully', { tempPassword }, res);
 });

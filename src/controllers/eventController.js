@@ -350,29 +350,53 @@ const updateEvent = asyncHandler(async (req, res) => {
   }
 
   // Handle banner uploads and metadata
+  const parsedMedia = media ? (typeof media === 'string' ? JSON.parse(media) : media) : null;
+  
   if (req.files && req.files.banners) {
     const banners = Array.isArray(req.files.banners) ? req.files.banners : [req.files.banners];
-    const parsedMedia = typeof media === 'string' ? JSON.parse(media) : media;
 
     if (!parsedMedia || !Array.isArray(parsedMedia)) {
       return res.status(400).json({ message: 'Media must be an array of banner objects' });
     }
 
-    if (banners.length !== parsedMedia.length) {
-      return res.status(400).json({ message: 'Number of uploaded files must match media metadata' });
+    // Process banners: if metadata has fileUrl, use it (existing banner)
+    // If metadata doesn't have fileUrl, use the next file from uploaded files (new banner)
+    const mediaData = [];
+    let fileIndex = 0;
+
+    for (const bannerData of parsedMedia) {
+      if (bannerData.fileUrl) {
+        // Existing banner - has fileUrl, preserve it
+        mediaData.push({
+          fileUrl: bannerData.fileUrl,
+          title: bannerData.title || '',
+          description: bannerData.description || '',
+          redirectUrl: bannerData.redirectUrl || '',
+          fromDate: bannerData.fromDate ? new Date(bannerData.fromDate) : null,
+          toDate: bannerData.toDate ? new Date(bannerData.toDate) : null,
+        });
+      } else if (fileIndex < banners.length) {
+        // New banner - no fileUrl, use uploaded file
+        const file = banners[fileIndex];
+        mediaData.push({
+          fileUrl: file?.path || '',
+          title: bannerData.title || '',
+          description: bannerData.description || '',
+          redirectUrl: bannerData.redirectUrl || '',
+          fromDate: bannerData.fromDate ? new Date(bannerData.fromDate) : null,
+          toDate: bannerData.toDate ? new Date(bannerData.toDate) : null,
+        });
+        fileIndex++;
+      } else {
+        // Banner without fileUrl and no more files - this is an error
+        return res.status(400).json({ message: 'Banner metadata without fileUrl must have a corresponding uploaded file' });
+      }
     }
 
-    const mediaData = banners.map((file, index) => {
-      const bannerData = parsedMedia[index] || {};
-      return {
-        fileUrl: file?.path || '',
-        title: bannerData.title || '',
-        description: bannerData.description || '',
-        redirectUrl: bannerData.redirectUrl || '',
-        fromDate: bannerData.fromDate ? new Date(bannerData.fromDate) : null,
-        toDate: bannerData.toDate ? new Date(bannerData.toDate) : null,
-      };
-    });
+    // Validate that all uploaded files were used
+    if (fileIndex !== banners.length) {
+      return res.status(400).json({ message: 'Number of uploaded files must match new banners (banners without fileUrl) in media metadata' });
+    }
 
     // Validate date ranges for banners
     const eventFromDate = fromDate ? new Date(fromDate) : event.fromDate;
@@ -388,7 +412,30 @@ const updateEvent = asyncHandler(async (req, res) => {
       }
     }
 
-    event.media = mediaData; // Replace existing media with new uploads
+    event.media = mediaData; // Merge existing media with new uploads
+  } else if (parsedMedia && Array.isArray(parsedMedia)) {
+    // If no files but media metadata is provided, update metadata only (preserve fileUrls)
+    const existingMediaMap = new Map((event.media || []).map(m => [m.fileUrl, m]));
+    const updatedMedia = parsedMedia.map(bannerData => {
+      // If banner has fileUrl, preserve it from existing media or use the provided one
+      if (bannerData.fileUrl && existingMediaMap.has(bannerData.fileUrl)) {
+        return {
+          ...existingMediaMap.get(bannerData.fileUrl),
+          ...bannerData,
+          fileUrl: bannerData.fileUrl, // Preserve existing fileUrl
+        };
+      }
+      // New banner without file - preserve fileUrl if provided
+      return {
+        fileUrl: bannerData.fileUrl || '',
+        title: bannerData.title || '',
+        description: bannerData.description || '',
+        redirectUrl: bannerData.redirectUrl || '',
+        fromDate: bannerData.fromDate ? new Date(bannerData.fromDate) : null,
+        toDate: bannerData.toDate ? new Date(bannerData.toDate) : null,
+      };
+    });
+    event.media = updatedMedia;
   }
 
   // Update other fields
