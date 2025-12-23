@@ -2,8 +2,8 @@
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const exhibitorSchema = new mongoose.Schema({
-  email: { type: String, unique: true },
-  phone: { type: String, unique: true, sparse: true, required: true },
+  email: { type: String },
+  phone: { type: String, required: true },
   companyName: { type: String },
   profileImage: { type: String },
   coverImage: { type: String },

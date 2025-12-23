@@ -11,47 +11,64 @@ const mongoose = require('mongoose');
 const generateSlots = require('../utils/slotGenerator');
 const createExhibitor = asyncHandler(async (req, res) => {
   const { eventId, ...exhibitorData } = req.body;
-  let exhibitor;
-  let isNewExhibitor = false;
+  
+  // Log for debugging
+  console.log('Create exhibitor request:', {
+    ...exhibitorData,
+    eventId: eventId || 'NOT PROVIDED',
+    hasEventId: !!eventId && eventId !== 'none'
+  });
+  
+  let existingExhibitor = null;
+  let duplicateField = '';
 
-  // Check if exhibitor already exists by phone or email
+  // Check for duplicate phone number
   if (exhibitorData.phone) {
-    exhibitor = await Exhibitor.findOne({
+    existingExhibitor = await Exhibitor.findOne({
       phone: exhibitorData.phone,
       isDeleted: false
     });
+    if (existingExhibitor) {
+      duplicateField = 'mobile number';
+    }
   }
 
-  if (!exhibitor && exhibitorData.email) {
-    exhibitor = await Exhibitor.findOne({
+  // Check for duplicate email if phone not found
+  if (!existingExhibitor && exhibitorData.email) {
+    existingExhibitor = await Exhibitor.findOne({
       email: exhibitorData.email,
       isDeleted: false
     });
+    if (existingExhibitor) {
+      duplicateField = 'email';
+    }
   }
 
-  if (exhibitor) {
-    Object.keys(exhibitorData).forEach(key => {
-      if (exhibitorData[key] && exhibitorData[key] !== '' && key !== 'keyWords') {
-        exhibitor[key] = exhibitorData[key];
-      }
+  // Return error if exhibitor already exists (DO NOT UPDATE)
+  if (existingExhibitor) {
+    const fieldMessage = duplicateField === 'mobile number' 
+      ? `An exhibitor with this mobile number (${exhibitorData.phone}) already exists. Please use the edit option to update the exhibitor.`
+      : `An exhibitor with this email (${exhibitorData.email}) already exists. Please use the edit option to update the exhibitor.`;
+    
+    return errorResponse(res, fieldMessage, 409);
+  }
+
+  // Check for deleted exhibitor with same email
+  if (exhibitorData.email) {
+    const deletedExhibitor = await Exhibitor.findOne({
+      email: exhibitorData.email,
+      isDeleted: true
     });
-    if (exhibitorData.keyWords) {
-      exhibitor.keyWords = exhibitorData.keyWords;
+    if (deletedExhibitor) {
+      return errorResponse(res, 'Contact administrator', 409);
     }
-  } else {
-    if (exhibitorData.email) {
-      const deletedExhibitor = await Exhibitor.findOne({
-        email: exhibitorData.email,
-        isDeleted: true
-      });
-      if (deletedExhibitor) {
-        return errorResponse(res, 'Contact administrator', 409);
-      }
-    }
-    exhibitor = new Exhibitor({
-      ...exhibitorData,
-      isActive: true
-    });
+  }
+
+  // Create new exhibitor (only if no duplicate found)
+  const exhibitor = new Exhibitor({
+    ...exhibitorData,
+    isActive: true
+  });
 
     try {
       const payload = {
@@ -75,9 +92,7 @@ const createExhibitor = asyncHandler(async (req, res) => {
       console.log(`Error in creating digital card: ${err}`);
     }
 
-    isNewExhibitor = true;
-  }
-
+  // Save the exhibitor to database before adding to event
   await exhibitor.save();
 
   let qrCode = null;
@@ -100,19 +115,19 @@ const createExhibitor = asyncHandler(async (req, res) => {
       return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
     }
 
-    const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
-    if (existingExhibitor) {
+    const existingExhibitorInEvent = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
+    if (existingExhibitorInEvent) {
       return successResponse(res, {
-        message: 'Exhibitor is already registered for this event',
+        message: 'Exhibitor created successfully. Exhibitor is already registered for this event',
         exhibitor: {
           _id: exhibitor._id,
           companyName: exhibitor.companyName,
           email: exhibitor.email,
           phone: exhibitor.phone
         },
-        isNewExhibitor,
+        isNewExhibitor: true,
         alreadyRegistered: true,
-        qrCode: existingExhibitor.qrCode,
+        qrCode: existingExhibitorInEvent.qrCode,
         event: {
           _id: event._id,
           title: event.title,
@@ -135,7 +150,8 @@ const createExhibitor = asyncHandler(async (req, res) => {
     event.exhibitor.push({
       userId: exhibitor._id,
       qrCode,
-      registeredAt: new Date()
+      registeredAt: new Date(),
+      isVerified: true // Auto-verify exhibitors created by organizer/superadmin
     });
 
     try {
@@ -175,14 +191,14 @@ const createExhibitor = asyncHandler(async (req, res) => {
   }
 
   successResponse(res, {
-    message: isNewExhibitor ? 'Exhibitor created successfully' : 'Exhibitor updated successfully',
+    message: 'Exhibitor created successfully',
     exhibitor: {
       _id: exhibitor._id,
       companyName: exhibitor.companyName,
       email: exhibitor.email,
       phone: exhibitor.phone
     },
-    isNewExhibitor,
+    isNewExhibitor: true,
     qrCode,
     event: event ? {
       _id: event._id,
@@ -190,16 +206,108 @@ const createExhibitor = asyncHandler(async (req, res) => {
       fromDate: event.fromDate,
       toDate: event.toDate
     } : null
-  }, isNewExhibitor ? 201 : 200);
+  }, 201);
 });
 
 const getExhibitors = asyncHandler(async (req, res) => {
-  const { search, status, page = 1, limit = 10, organizerId } = req.body;
+  const { search, status, page = 1, limit = 10, organizerId, eventId } = req.body;
   const userRole = req.user.type;
   const currentUserId = req.user.id;
 
   let exhibitors;
   let total;
+
+  // Filter by eventId if provided
+  if (eventId && eventId !== 'all') {
+    // Find the event
+    const event = await Event.findById(eventId);
+    if (!event) {
+      return res.status(200).json({
+        exhibitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+
+    // Check if organizer has access to this event
+    if (userRole === 'organizer' && event.organizerId.toString() !== currentUserId) {
+      return res.status(200).json({
+        exhibitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+
+    // Get exhibitor IDs from the event's exhibitor array (only verified)
+    const exhibitorIds = event.exhibitor
+      .filter(ex => ex.isVerified === true)
+      .map(ex => ex.userId);
+
+    if (exhibitorIds.length === 0) {
+      // No exhibitors registered for this event
+      return res.status(200).json({
+        exhibitors: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalItems: 0,
+          itemsPerPage: parseInt(limit)
+        }
+      });
+    }
+
+    let query = {
+      _id: { $in: exhibitorIds },
+      isDeleted: false
+    };
+
+    // Filter by status
+    if (status && status !== 'all') {
+      query.isActive = status === 'active';
+    }
+
+    // Add search functionality
+    if (search && search.trim()) {
+      query.$or = [
+        { companyName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { Sector: { $regex: search, $options: 'i' } },
+        { location: { $regex: search, $options: 'i' } },
+        { bio: { $regex: search, $options: 'i' } },
+        { website: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+    total = await Exhibitor.countDocuments(query);
+
+    exhibitors = await Exhibitor.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const response = {
+      exhibitors,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
+      }
+    };
+
+    return res.status(200).json(response);
+  }
 
   // If organizer is requesting, filter by their events only
   if (userRole === 'organizer' || organizerId) {
@@ -344,10 +452,157 @@ const getExhibitorById = asyncHandler(async (req, res) => {
   successResponse(res, exhibitor);
 });
 const updateExhibitor = asyncHandler(async (req, res) => {
-  const { id, ...updateData } = req.body; // Changed from params to body
-  const exhibitor = await Exhibitor.findByIdAndUpdate(id, updateData, { new: true });
+  const { id, eventId, ...updateData } = req.body; // Extract eventId separately
+  const exhibitor = await Exhibitor.findById(id);
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
-  successResponse(res, exhibitor);
+
+  // Check for duplicate phone number (if phone is being updated and different from current)
+  if (updateData.phone && updateData.phone !== exhibitor.phone) {
+    const existingExhibitorByPhone = await Exhibitor.findOne({
+      phone: updateData.phone,
+      isDeleted: false,
+      _id: { $ne: id } // Exclude current exhibitor
+    });
+    if (existingExhibitorByPhone) {
+      return errorResponse(res, `An exhibitor with this mobile number (${updateData.phone}) already exists`, 409);
+    }
+  }
+
+  // Check for duplicate email (if email is being updated and different from current)
+  if (updateData.email && updateData.email !== exhibitor.email) {
+    const existingExhibitorByEmail = await Exhibitor.findOne({
+      email: updateData.email,
+      isDeleted: false,
+      _id: { $ne: id } // Exclude current exhibitor
+    });
+    if (existingExhibitorByEmail) {
+      return errorResponse(res, `An exhibitor with this email (${updateData.email}) already exists`, 409);
+    }
+  }
+
+  // Update exhibitor data (excluding eventId)
+  Object.keys(updateData).forEach(key => {
+    if (updateData[key] !== undefined && key !== 'keyWords') {
+      exhibitor[key] = updateData[key];
+    }
+  });
+  if (updateData.keyWords !== undefined) {
+    exhibitor.keyWords = updateData.keyWords;
+  }
+
+  await exhibitor.save();
+
+  let qrCode = null;
+  let event = null;
+  // Handle event enrollment if eventId is provided
+  if (eventId && eventId !== 'none') {
+    event = await Event.findById(eventId);
+    if (!event) {
+      return errorResponse(res, 'Event not found', 404);
+    }
+    if (!event.isActive) {
+      return errorResponse(res, 'Cannot add exhibitor to inactive event', 400);
+    }
+    if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+      return errorResponse(res, 'Access denied', 403);
+    }
+
+    const currentDate = new Date();
+    const eventEndDate = new Date(event.toDate);
+    if (currentDate > eventEndDate) {
+      return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
+    }
+
+    const existingExhibitorInEvent = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
+    if (existingExhibitorInEvent) {
+      return successResponse(res, {
+        message: 'Exhibitor updated successfully. Exhibitor is already registered for this event',
+        exhibitor: {
+          _id: exhibitor._id,
+          companyName: exhibitor.companyName,
+          email: exhibitor.email,
+          phone: exhibitor.phone
+        },
+        alreadyRegistered: true,
+        qrCode: existingExhibitorInEvent.qrCode,
+        event: {
+          _id: event._id,
+          title: event.title,
+          fromDate: event.fromDate,
+          toDate: event.toDate
+        }
+      });
+    }
+
+    const qrData = {
+      eventId: event._id,
+      userId: exhibitor._id,
+      userType: 'exhibitor',
+      startDate: event.fromDate,
+      endDate: event.toDate,
+      eventTitle: event.title
+    };
+    qrCode = await require('../utils/qrGenerator')(qrData);
+
+    event.exhibitor.push({
+      userId: exhibitor._id,
+      qrCode,
+      registeredAt: new Date(),
+      isVerified: true // Auto-verify exhibitors updated/added by organizer/superadmin
+    });
+
+    try {
+      const existingSlots = await UserEventSlot.findOne({
+        userId: exhibitor._id,
+        userType: 'exhibitor',
+        eventId
+      });
+
+      if (!existingSlots) {
+        const rawSlots = generateSlots(
+          event.fromDate,
+          event.toDate,
+          event.meetingStartTime || event.startTime,
+          event.meetingEndTime || event.endTime,
+          event.timeInterval || 30
+        );
+        const slots = rawSlots.map(s => ({
+          start: s.start,
+          end: s.end,
+          status: 'available',
+          showSlots: false
+        }));
+        const userSlot = new UserEventSlot({
+          userId: exhibitor._id,
+          userType: 'exhibitor',
+          eventId,
+          slots
+        });
+        await userSlot.save();
+      }
+    } catch (slotError) {
+      console.error('Error generating slots:', slotError);
+    }
+
+    await event.save();
+  }
+
+  successResponse(res, {
+    message: 'Exhibitor updated successfully',
+    exhibitor: {
+      _id: exhibitor._id,
+      companyName: exhibitor.companyName,
+      email: exhibitor.email,
+      phone: exhibitor.phone
+    },
+    qrCode,
+    event: event ? {
+      _id: event._id,
+      title: event.title,
+      fromDate: event.fromDate,
+      toDate: event.toDate
+    } : null
+  });
 });
 
 const deleteExhibitor = asyncHandler(async (req, res) => {
