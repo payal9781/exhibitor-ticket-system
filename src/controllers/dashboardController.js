@@ -319,9 +319,10 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
     return created >= startOfPreviousMonth && created <= endOfPreviousMonth;
   }).length;
   
-  // Get total active users (exhibitors + visitors)
+  // Get total active users (exhibitors + visitors + organizers)
   let exhibitorQuery = { isDeleted: false, isActive: true };
   let visitorQuery = { isDeleted: false, isActive: true };
+  let activeOrganizerQuery = { isDeleted: false, isActive: true };
   
   // Apply date filter for users if provided
   if (startDate || endDate) {
@@ -336,11 +337,13 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
     }
     exhibitorQuery.createdAt = userDateFilter;
     visitorQuery.createdAt = userDateFilter;
+    activeOrganizerQuery.createdAt = userDateFilter;
   }
   
   const totalExhibitors = await Exhibitor.countDocuments(exhibitorQuery);
   const totalVisitors = await Visitor.countDocuments(visitorQuery);
-  const activeUsers = totalExhibitors + totalVisitors;
+  const totalActiveOrganizers = await Organizer.countDocuments(activeOrganizerQuery);
+  const activeUsers = totalExhibitors + totalVisitors + totalActiveOrganizers;
   
   // Calculate current week period
   const startOfWeek = new Date();
@@ -367,7 +370,12 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
     createdAt: { $gte: startOfWeek, $lte: endOfWeek }
   });
   
-  const usersThisWeek = exhibitorsThisWeek + visitorsThisWeek;
+  const organizersThisWeek = await Organizer.countDocuments({
+    ...activeOrganizerQuery,
+    createdAt: { $gte: startOfWeek, $lte: endOfWeek }
+  });
+  
+  const usersThisWeek = exhibitorsThisWeek + visitorsThisWeek + organizersThisWeek;
   
   // Get users created in previous week
   const exhibitorsPreviousWeek = await Exhibitor.countDocuments({
@@ -380,7 +388,12 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
     createdAt: { $gte: startOfPreviousWeek, $lte: endOfPreviousWeek }
   });
   
-  const usersPreviousWeek = exhibitorsPreviousWeek + visitorsPreviousWeek;
+  const organizersPreviousWeek = await Organizer.countDocuments({
+    ...activeOrganizerQuery,
+    createdAt: { $gte: startOfPreviousWeek, $lte: endOfPreviousWeek }
+  });
+  
+  const usersPreviousWeek = exhibitorsPreviousWeek + visitorsPreviousWeek + organizersPreviousWeek;
   
   // Calculate platform revenue (mock calculation)
   const platformRevenue = totalEvents * 500 + totalOrganizers * 2000 + activeUsers * 25;
