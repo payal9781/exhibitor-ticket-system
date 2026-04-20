@@ -311,6 +311,8 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
 
   const events = await Event.find(query)
     .populate('organizerId', 'name email organizationName')
+    .populate('exhibitor.userId', 'companyName email phone profileImage bio Sector location')
+    .populate('visitor.userId', 'name email phone profileImage bio Sector location companyName')
     .sort({ fromDate: 1 });
 
   // Add status and connection count for each event
@@ -1229,33 +1231,41 @@ const getSchedules = asyncHandler(async (req, res) => {
 
   const event = await Event.aggregate([
     {
-      $match:{
-        _id:new mongoose.Types.ObjectId(eventId)
+      $match: {
+        _id: new mongoose.Types.ObjectId(eventId)
       }
     },
-  {
-    $project:
-      /**
-       * specifications: The fields to
-       *   include or exclude.
-       */
-      {
-        schedules: 1
+    {
+      $lookup: {
+        from: 'organizers',
+        localField: 'organizerId',
+        foreignField: '_id',
+        as: 'organizer'
       }
-  },
-  {
-    $unwind:
-      /**
-       * path: Path to the array field.
-       * includeArrayIndex: Optional name for index.
-       * preserveNullAndEmptyArrays: Optional
-       *   toggle to unwind null and empty values.
-       */
-      {
-        path: "$schedules"
+    },
+    {
+      $unwind: {
+        path: '$organizer',
+        preserveNullAndEmptyArrays: true
       }
-  }
-]).exec();
+    },
+    {
+      $project: {
+        schedules: 1,
+        organizer: {
+          name: 1,
+          email: 1,
+          organizationName: 1
+        }
+      }
+    },
+    {
+      $unwind: {
+        path: "$schedules",
+        preserveNullAndEmptyArrays: true
+      }
+    }
+  ]).exec();
   if (!event) return errorResponse(res, 'Event not found', 404);
     successResponse(res, {
       message: 'All schedules retrieved',

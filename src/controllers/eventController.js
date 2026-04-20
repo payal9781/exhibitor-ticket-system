@@ -1690,12 +1690,13 @@ const getSponsors = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event ID is required', 400);
   }
 
-  const event = await Event.findById(eventId).select('sponsors');
+  const event = await Event.findById(eventId).select('sponsors organizerId').populate('organizerId', 'name email organizationName');
   if (!event) return errorResponse(res, 'Event not found', 404);
 
   successResponse(res, {
     sponsors: event.sponsors,
-    total: event.sponsors.length
+    total: event.sponsors.length,
+    organizer: event.organizerId
   });
 });
 
