@@ -86,66 +86,59 @@ const sendOtp = asyncHandler(async (req, res) => {
   if (!['exhibitor', 'visitor'].includes(role)) {
     return successResponse(res, { message: 'Invalid role for OTP login', data: 0 });
   }
+
   const Model = getModelByRole(role);
   let user = await Model.findOne({ phone });
   let exists = !!user;
+
   if (!user) {
     user = new Model({ phone });
     await user.save();
   }
-  const otp = generateOtp();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-  user.otp = otp;
-  user.otpExpires = expiresAt;
-  await user.save();
-  const sent = await otpService(phone, otp);
-  if (!sent) {
-    return successResponse(res, { message: 'Failed to send OTP', data: 0 });
+
+  // Use the new OTP service
+  const result = await otpService.sendOTP(phone);
+  
+  if (!result.success) {
+    return errorResponse(res, result.message || 'Failed to send OTP', 500);
   }
+
   successResponse(res, {
     message: 'OTP sent successfully',
     data: {
       userId: user._id,
-      exists
+      exists,
+      sessionId: result.data.sessionId
     }
   });
 });
 
 const verifyOtp = asyncHandler(async (req, res) => {
-  const { role, phone, otp, machineId ,fcmToken} = req.body;
+  const { role, phone, otp, machineId, fcmToken } = req.body;
   if (!['exhibitor', 'visitor'].includes(role)) {
     return successResponse(res, { message: 'Invalid role for OTP login', data: 0 });
   }
+
   const Model = getModelByRole(role);
   const user = await Model.findOne({ phone });
   if (!user) {
     return successResponse(res, { message: 'User not found', data: 0 });
   }
 
-  if (otp && otp == '1234') {
-    user.otp = '1234';
-    user.otpExpires = new Date(moment().add(1, 'days').toDate());
-    await user.save();
+  // Use the new OTP service
+  const verifyResult = await otpService.verifyOTP(phone, otp);
+
+  if (!verifyResult.success) {
+    return successResponse(res, { message: verifyResult.message || 'Invalid or expired OTP', data: 0 });
   }
 
-  if (!user.otp || user.otp !== otp || user.otpExpires < new Date()) {
-    user.otp = undefined;
-    user.otpExpires = undefined;
-
-    await user.save();
-    return successResponse(res, { message: 'Invalid or expired OTP', data: 0 });
-  }
-
-  if (!machineId && machineId != '') {
-    return successResponse(res, { message: 'Invalid device id', data: 0 });
-  } else {
+  if (machineId !== undefined) {
     user.machineId = machineId;
-    user.fcmToken = fcmToken;
-    await user.save();
   }
-
-  user.otp = undefined;
-  user.otpExpires = undefined;
+  if (fcmToken !== undefined) {
+    user.fcmToken = fcmToken;
+  }
+  await user.save();
   if (!user.isActive) {
     return successResponse(res, { message: 'user is inactive', data: 0 });
   }
@@ -188,7 +181,7 @@ const login = asyncHandler(async (req, res) => {
 
   // Find user by email
   const user = await Model.findOne({ email });
-  
+
   // Don't reveal if email exists or not for security
   // Return generic error to prevent user enumeration attacks
   if (!user) {
@@ -208,18 +201,18 @@ const login = asyncHandler(async (req, res) => {
 
   // Generate token
   const token = user.generateAccessToken();
-  
+
   // Prepare user response
   const userResponse = user.toObject();
   delete userResponse.password;
   userResponse.role = role;
-  
+
   successResponse(res, { user: userResponse, token });
 });
 
 
 const loginApp = asyncHandler(async (req, res) => {
-  const { role, phone, machineId ,fcmToken} = req.body;
+  const { role, phone, machineId, fcmToken } = req.body;
 
   // Validate role
   if (!['exhibitor', 'visitor'].includes(role)) {

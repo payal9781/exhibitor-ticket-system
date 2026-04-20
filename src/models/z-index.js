@@ -11,6 +11,7 @@ const models = {
   Meeting: require('./meeting'),
   ScannedCards: require('./ScannedCards'),
   Leads : require('./leads'),
+  Otp: require('./Otp'),
 };
 
 module.exports = { models };
