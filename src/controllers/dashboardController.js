@@ -448,88 +448,121 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
 
 // Get recent activity for dashboard
 const getRecentActivity = asyncHandler(async (req, res) => {
-  // Support both GET (query params) and POST (body) requests
-  // Handle filters nested in body or directly in body/query
   let filters = {};
   if (req.method === 'POST') {
     filters = req.body?.filters || req.body || {};
   } else {
     filters = req.query || {};
   }
-  const { startDate, endDate, organizerId } = filters;
   
-  // For organizer users, automatically filter by their organizerId
-  let finalOrganizerId = organizerId;
-  if (req.user.type === 'organizer' && req.user.id) {
-    finalOrganizerId = req.user.id;
-  }
+  const { startDate, endDate } = filters;
+  const userType = req.user?.type;
+  const userId = req.user?.id;
+
+  console.log(`[RecentActivity] Request from ${userType} (ID: ${userId})`);
   
   const activities = [];
   
-  // Build event query
-  let eventQuery = { isDeleted: false };
-  if (finalOrganizerId) {
-    eventQuery.organizerId = finalOrganizerId;
-  }
+  // Build date filter
+  const dateFilter = {};
   if (startDate || endDate) {
-    eventQuery.updatedAt = {};
-    if (startDate) {
-      eventQuery.updatedAt.$gte = new Date(startDate);
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      eventQuery.updatedAt.$lte = end;
-    }
-  }
-  
-  // Build exhibitor/visitor query
-  let exhibitorQuery = { isDeleted: false };
-  let visitorQuery = { isDeleted: false };
-  if (startDate || endDate) {
-    const dateFilter = {};
-    if (startDate) {
-      dateFilter.$gte = new Date(startDate);
-    }
+    if (startDate) dateFilter.$gte = new Date(startDate);
     if (endDate) {
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
       dateFilter.$lte = end;
     }
-    exhibitorQuery.createdAt = dateFilter;
-    visitorQuery.createdAt = dateFilter;
   }
-  
-  // Get recent events
-  const recentEvents = await Event.find(eventQuery)
-    .sort({ updatedAt: -1 })
-    .limit(5)
-    .select('title updatedAt createdAt');
-  
-  // Get recent exhibitors
-  const recentExhibitors = await Exhibitor.find(exhibitorQuery)
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .select('companyName createdAt');
-  
-  // Get recent visitors
-  const recentVisitors = await Visitor.find(visitorQuery)
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .select('name createdAt');
-  
-  // Format activities - only show creation activities, not updates
-  recentEvents.forEach(event => {
-    const isNew = event.createdAt.getTime() === event.updatedAt.getTime();
-    // Only add activity if it's a new event, not an update
-    if (isNew) {
-      activities.push({
-        action: `New event "${event.title}" was created`,
-        time: getTimeAgo(event.createdAt),
-        timestamp: event.createdAt,
-        type: 'event'
+
+  let recentEvents = [];
+  let recentExhibitors = [];
+  let recentVisitors = [];
+
+  if (userType === 'organizer') {
+    // --- ORGANIZER SCOPE: Strict Data Isolation ---
+    const organizerId = userId;
+    
+    // 1. Get recent events for this organizer
+    let eventQuery = { organizerId, isDeleted: false };
+    if (Object.keys(dateFilter).length > 0) eventQuery.updatedAt = dateFilter;
+    
+    recentEvents = await Event.find(eventQuery)
+      .sort({ updatedAt: -1 })
+      .limit(10)
+      .select('title updatedAt createdAt');
+
+    // 2. Get recent exhibitors/visitors specifically for this organizer's events
+    const organizerEvents = await Event.find({ 
+      organizerId, 
+      isDeleted: false 
+    }).select('exhibitor visitor');
+
+    const exhibitorIds = new Set();
+    const visitorIds = new Set();
+
+    organizerEvents.forEach(event => {
+      if (event.exhibitor) event.exhibitor.forEach(e => {
+        if (e.userId) exhibitorIds.add(e.userId.toString());
       });
+      if (event.visitor) event.visitor.forEach(v => {
+        if (v.userId) visitorIds.add(v.userId.toString());
+      });
+    });
+
+    if (exhibitorIds.size > 0) {
+      let exhibitorQuery = { _id: { $in: Array.from(exhibitorIds) }, isDeleted: false };
+      if (Object.keys(dateFilter).length > 0) exhibitorQuery.createdAt = dateFilter;
+      
+      recentExhibitors = await Exhibitor.find(exhibitorQuery)
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .select('companyName createdAt');
     }
+
+    if (visitorIds.size > 0) {
+      let visitorQuery = { _id: { $in: Array.from(visitorIds) }, isDeleted: false };
+      if (Object.keys(dateFilter).length > 0) visitorQuery.createdAt = dateFilter;
+
+      recentVisitors = await Visitor.find(visitorQuery)
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .select('name createdAt');
+    }
+  } else if (userType === 'superAdmin') {
+    // --- SUPER ADMIN SCOPE: Global View ---
+    const targetOrganizerId = filters.organizerId;
+    
+    let eventQuery = { isDeleted: false };
+    if (targetOrganizerId) eventQuery.organizerId = targetOrganizerId;
+    if (Object.keys(dateFilter).length > 0) eventQuery.updatedAt = dateFilter;
+
+    recentEvents = await Event.find(eventQuery)
+      .sort({ updatedAt: -1 })
+      .limit(10)
+      .select('title updatedAt createdAt');
+
+    let globalUserQuery = { isDeleted: false };
+    if (Object.keys(dateFilter).length > 0) globalUserQuery.createdAt = dateFilter;
+
+    recentExhibitors = await Exhibitor.find(globalUserQuery)
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('companyName createdAt');
+    
+    recentVisitors = await Visitor.find(globalUserQuery)
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('name createdAt');
+  }
+
+  // Format activities
+  recentEvents.forEach(event => {
+    activities.push({
+      action: `Event "${event.title}" was ${event.createdAt.getTime() === event.updatedAt.getTime() ? 'created' : 'updated'}`,
+      time: getTimeAgo(event.updatedAt),
+      timestamp: event.updatedAt,
+      type: 'event'
+    });
   });
   
   recentExhibitors.forEach(exhibitor => {
@@ -550,10 +583,8 @@ const getRecentActivity = asyncHandler(async (req, res) => {
     });
   });
   
-  // Sort by timestamp and limit to 5
   activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  
-  successResponse(res, activities.slice(0, 5));
+  successResponse(res, activities.slice(0, 10));
 });
 
 // Helper function to calculate time ago

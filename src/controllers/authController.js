@@ -67,6 +67,21 @@ const register = asyncHandler(async (req, res) => {
     await user.save();
     const token = user.generateAccessToken();
 
+    // Send welcome email with credentials
+    try {
+      const emailService = require('../services/emailService');
+      await emailService.sendWelcomeEmail(
+        user.name || userData.name,
+        user.email,
+        userData.password
+      );
+      console.log(`Welcome email sent to: ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+      // We don't want to fail the whole registration if only the email fails,
+      // but we log it for debugging.
+    }
+
     const userResponse = user.toObject();
     delete userResponse.password;
     userResponse.role = role;
