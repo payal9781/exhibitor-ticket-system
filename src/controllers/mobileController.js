@@ -10,6 +10,7 @@ const { default: mongoose } = require('mongoose');
 const Attendance = require('../models/z-index').models.Attendance;
 const fcmNotification = require('../utils/fcmToken_notification').sendNotification;
 const Notification = require('../models/notification');
+const Follow = require('../models/Follow');
 // Get total connections for exhibitor/visitor across all events
 const getTotalConnections = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -1641,6 +1642,222 @@ const markNotificationAsRead = asyncHandler(async (req, res) => {
   successResponse(res, { message: 'Notification marked as read', notification });
 });
 
+// Get user details with follow status
+const getUserDetails = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const currentUserId = req.user.id;
+  const currentUserType = req.user.type;
+
+  if (!userId) {
+    return errorResponse(res, 'User ID is required', 400);
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return errorResponse(res, 'Invalid user ID', 400);
+  }
+
+  // Try to find user in both Exhibitor and Visitor collections
+  let user = await Exhibitor.findById(userId).select('-otp -otpExpires -password').lean();
+  let userType = 'exhibitor';
+
+  if (!user) {
+    user = await Visitor.findById(userId).select('-otp -otpExpires -password').lean();
+    userType = 'visitor';
+  }
+
+  if (!user) {
+    return errorResponse(res, 'User not found', 404);
+  }
+
+  // Check if current user is following this user
+  const isFollowing = await Follow.findOne({
+    followerId: currentUserId,
+    followerType: currentUserType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+    followingId: userId,
+    followingType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  });
+
+  // Get follower and following counts
+  const followersCount = await Follow.countDocuments({
+    followingId: userId,
+    followingType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  });
+
+  const followingCount = await Follow.countDocuments({
+    followerId: userId,
+    followerType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  });
+
+  // Add follow status and counts to user object
+  const userWithFollowStatus = {
+    ...user,
+    userType,
+    isFollowing: !!isFollowing,
+    followersCount,
+    followingCount
+  };
+
+  successResponse(res, userWithFollowStatus);
+});
+
+// Follow a user
+const followUser = asyncHandler(async (req, res) => {
+  const { userId, userType } = req.body;
+  const currentUserId = req.user.id;
+  const currentUserType = req.user.type;
+
+  if (!userId || !userType) {
+    return errorResponse(res, 'User ID and user type are required', 400);
+  }
+
+  if (!['exhibitor', 'visitor'].includes(userType)) {
+    return errorResponse(res, 'Invalid user type', 400);
+  }
+
+  // Check if user exists
+  const Model = userType === 'exhibitor' ? Exhibitor : Visitor;
+  const userToFollow = await Model.findById(userId);
+
+  if (!userToFollow) {
+    return errorResponse(res, 'User not found', 404);
+  }
+
+  // Prevent self-follow
+  if (userId === currentUserId) {
+    return errorResponse(res, 'You cannot follow yourself', 400);
+  }
+
+  // Check if already following
+  const existingFollow = await Follow.findOne({
+    followerId: currentUserId,
+    followerType: currentUserType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+    followingId: userId,
+    followingType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  });
+
+  if (existingFollow) {
+    return errorResponse(res, 'You are already following this user', 400);
+  }
+
+  // Create follow relationship
+  const follow = new Follow({
+    followerId: currentUserId,
+    followerType: currentUserType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+    followingId: userId,
+    followingType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  });
+
+  await follow.save();
+
+  // Create notification for the followed user
+  const followerModel = currentUserType === 'exhibitor' ? Exhibitor : Visitor;
+  const follower = await followerModel.findById(currentUserId).select('companyName name');
+  const followerName = follower.companyName || follower.name;
+
+  const notification = new Notification({
+    recipientId: userId,
+    recipientType: userType,
+    type: 'new_follower',
+    title: 'New Follower',
+    message: `${followerName} started following you`,
+    data: {
+      followerId: currentUserId,
+      followerType: currentUserType
+    }
+  });
+  await notification.save();
+
+  // Send FCM notification if user has FCM token
+  if (userToFollow.fcmToken) {
+    await fcmNotification(userToFollow.fcmToken, [
+      'New Follower',
+      `${followerName} started following you`,
+      {}
+    ]);
+  }
+
+  successResponse(res, {
+    message: 'Successfully followed user',
+    isFollowing: true
+  }, 201);
+});
+
+// Unfollow a user
+const unfollowUser = asyncHandler(async (req, res) => {
+  const { userId, userType } = req.body;
+  const currentUserId = req.user.id;
+  const currentUserType = req.user.type;
+
+  if (!userId || !userType) {
+    return errorResponse(res, 'User ID and user type are required', 400);
+  }
+
+  if (!['exhibitor', 'visitor'].includes(userType)) {
+    return errorResponse(res, 'Invalid user type', 400);
+  }
+
+  // Find and delete the follow relationship
+  const follow = await Follow.findOneAndDelete({
+    followerId: currentUserId,
+    followerType: currentUserType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+    followingId: userId,
+    followingType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  });
+
+  if (!follow) {
+    return errorResponse(res, 'You are not following this user', 400);
+  }
+
+  successResponse(res, {
+    message: 'Successfully unfollowed user',
+    isFollowing: false
+  });
+});
+
+// Get user's followers
+const getFollowers = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const userType = req.user.type;
+
+  const followers = await Follow.find({
+    followingId: userId,
+    followingType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  }).populate('followerId', 'companyName name email phone profileImage bio Sector location');
+
+  const followersList = followers.map(follow => ({
+    ...follow.followerId.toObject(),
+    userType: follow.followerType.toLowerCase(),
+    followedAt: follow.createdAt
+  }));
+
+  successResponse(res, {
+    totalFollowers: followersList.length,
+    followers: followersList
+  });
+});
+
+// Get users that current user is following
+const getFollowing = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const userType = req.user.type;
+
+  const following = await Follow.find({
+    followerId: userId,
+    followerType: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
+  }).populate('followingId', 'companyName name email phone profileImage bio Sector location');
+
+  const followingList = following.map(follow => ({
+    ...follow.followingId.toObject(),
+    userType: follow.followingType.toLowerCase(),
+    followedAt: follow.createdAt
+  }));
+
+  successResponse(res, {
+    totalFollowing: followingList.length,
+    following: followingList
+  });
+});
+
 module.exports = {
   getTotalConnections,
   getEventAnalytics,
@@ -1664,5 +1881,10 @@ module.exports = {
   getAllMeetings,
   getScans,
   getNotifications,
-   markNotificationAsRead 
+  markNotificationAsRead,
+  getUserDetails,
+  followUser,
+  unfollowUser,
+  getFollowers,
+  getFollowing
 };
