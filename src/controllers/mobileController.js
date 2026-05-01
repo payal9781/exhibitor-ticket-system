@@ -264,6 +264,26 @@ const getEventConnections = asyncHandler(async (req, res) => {
     ]
   });
 
+  // Get user's QR code for this event
+  const fullEvent = await Event.findById(eventId);
+  let myQRCode = null;
+  let registeredAt = null;
+
+  if (fullEvent) {
+    const userRegistration = userType === 'exhibitor'
+      ? fullEvent.exhibitor.find(e => {
+          const exhibitorId = e.userId._id ? e.userId._id.toString() : e.userId.toString();
+          return exhibitorId === userId.toString();
+        })
+      : fullEvent.visitor.find(v => {
+          const visitorId = v.userId._id ? v.userId._id.toString() : v.userId.toString();
+          return visitorId === userId.toString();
+        });
+
+    myQRCode = userRegistration?.qrCode;
+    registeredAt = userRegistration?.registeredAt;
+  }
+
   successResponse(res, {
     message: 'Event connections retrieved successfully',
     data: {
@@ -276,6 +296,8 @@ const getEventConnections = asyncHandler(async (req, res) => {
       totalConnections,
       totalEventsCount,
       totalAcceptedMeetings,
+      myQRCode,
+      registeredAt,
       exhibitorConnections: scannedExhibitors,
       visitorConnections: scannedVisitors
     }
@@ -351,8 +373,14 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
 
     // Add user's QR code for this event
     const userRegistration = userType === 'exhibitor'
-      ? event.exhibitor.find(e => e.userId.toString() === userId.toString())
-      : event.visitor.find(v => v.userId.toString() === userId.toString());
+      ? event.exhibitor.find(e => {
+          const exhibitorId = e.userId._id ? e.userId._id.toString() : e.userId.toString();
+          return exhibitorId === userId.toString();
+        })
+      : event.visitor.find(v => {
+          const visitorId = v.userId._id ? v.userId._id.toString() : v.userId.toString();
+          return visitorId === userId.toString();
+        });
 
     eventObj.myQRCode = userRegistration?.qrCode;
     eventObj.registeredAt = userRegistration?.registeredAt;
@@ -750,7 +778,7 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
 
   const notification = new Notification({
     recipientId: requestedId, // Assuming scannedUserId is the recipient
-    recipientType: requestedType,
+    recipientType: requestedType.toLowerCase(), // Ensure lowercase
     type: 'meeting_request',
     title: 'New Meeting Request',
     message: `You have received a meeting request from ${req.user.name || req.user.companyName} for slot starting at ${new Date(slotStart)}.`,
@@ -907,7 +935,7 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
   // Create and save notification for the requester
   const notification = new Notification({
     recipientId: meeting.requesterId, // Assuming meeting model has requesterId and requesterType
-    recipientType: meeting.requesterType,
+    recipientType: meeting.requesterType.toLowerCase(), // Ensure lowercase
     type: 'meeting_response',
     title: notifTitle,
     message: notifMessage,
@@ -1601,12 +1629,19 @@ const getScans = asyncHandler(async (req, res) => {
 
 const getNotifications = asyncHandler(async (req, res) => {
   const currentUserId = req.user.id;
-  const currentUserType = req.user.type; // Assuming req.user.type is set in authMiddleware as 'exhibitor' or 'visitor'
+  const currentUserType = req.user.type; // Should be 'exhibitor' or 'visitor' (lowercase)
+
+  console.log('[getNotifications] Querying notifications for:', {
+    recipientId: currentUserId,
+    recipientType: currentUserType
+  });
 
   const notifications = await Notification.find({
     recipientId: currentUserId,
     recipientType: currentUserType
   }).sort({ createdAt: -1 }).limit(50); // Limit to recent 50 for performance
+
+  console.log('[getNotifications] Found notifications:', notifications.length);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -1756,7 +1791,7 @@ const followUser = asyncHandler(async (req, res) => {
 
   const notification = new Notification({
     recipientId: userId,
-    recipientType: userType,
+    recipientType: userType.toLowerCase(), // Ensure lowercase
     type: 'new_follower',
     title: 'New Follower',
     message: `${followerName} started following you`,
