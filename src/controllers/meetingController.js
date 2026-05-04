@@ -221,3 +221,402 @@ module.exports = {
   getUserMeetingsByDate,
   cancelMeeting
 };
+
+
+// Admin: Get all meetings with full details
+const getAllMeetingsAdmin = asyncHandler(async (req, res) => {
+  const { eventId, status, page = 1, limit = 50, search = '' } = req.body;
+
+  let query = {};
+  
+  if (eventId) {
+    query.eventId = eventId;
+  }
+  
+  if (status && status !== 'all') {
+    query.status = status;
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [meetings, totalCount] = await Promise.all([
+    Meeting.find(query)
+      .populate('eventId', 'title fromDate toDate location')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Meeting.countDocuments(query)
+  ]);
+
+  // Get full details for each meeting
+  const meetingsWithDetails = await Promise.all(
+    meetings.map(async (meeting) => {
+      // Get requester details
+      let requesterDetails;
+      if (meeting.requesterType === 'exhibitor') {
+        requesterDetails = await require('../models/Exhibitor').findById(meeting.requesterId)
+          .select('companyName email phone profileImage bio Sector location');
+      } else {
+        requesterDetails = await require('../models/Visitor').findById(meeting.requesterId)
+          .select('name email phone profileImage bio Sector location companyName');
+      }
+
+      // Get requestee details
+      let requesteeDetails;
+      if (meeting.requesteeType === 'exhibitor') {
+        requesteeDetails = await require('../models/Exhibitor').findById(meeting.requesteeId)
+          .select('companyName email phone profileImage bio Sector location');
+      } else {
+        requesteeDetails = await require('../models/Visitor').findById(meeting.requesteeId)
+          .select('name email phone profileImage bio Sector location companyName');
+      }
+
+      return {
+        _id: meeting._id,
+        event: {
+          _id: meeting.eventId._id,
+          title: meeting.eventId.title,
+          fromDate: meeting.eventId.fromDate,
+          toDate: meeting.eventId.toDate,
+          location: meeting.eventId.location
+        },
+        requester: {
+          ...requesterDetails?.toObject(),
+          type: meeting.requesterType,
+          displayName: requesterDetails?.companyName || requesterDetails?.name || 'Unknown'
+        },
+        requestee: {
+          ...requesteeDetails?.toObject(),
+          type: meeting.requesteeType,
+          displayName: requesteeDetails?.companyName || requesteeDetails?.name || 'Unknown'
+        },
+        slotStart: meeting.slotStart,
+        slotEnd: meeting.slotEnd,
+        status: meeting.status,
+        createdAt: meeting.createdAt,
+        updatedAt: meeting.updatedAt
+      };
+    })
+  );
+
+  // Filter by search if provided
+  let filteredMeetings = meetingsWithDetails;
+  if (search) {
+    const searchLower = search.toLowerCase();
+    filteredMeetings = meetingsWithDetails.filter(meeting => 
+      meeting.event.title.toLowerCase().includes(searchLower) ||
+      meeting.requester.displayName.toLowerCase().includes(searchLower) ||
+      meeting.requestee.displayName.toLowerCase().includes(searchLower) ||
+      meeting.requester.email?.toLowerCase().includes(searchLower) ||
+      meeting.requestee.email?.toLowerCase().includes(searchLower)
+    );
+  }
+
+  // Get status counts
+  const statusCounts = await Meeting.aggregate([
+    ...(eventId ? [{ $match: { eventId: require('mongoose').Types.ObjectId(eventId) } }] : []),
+    {
+      $group: {
+        _id: '$status',
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+
+  const counts = {
+    all: totalCount,
+    pending: 0,
+    accepted: 0,
+    rejected: 0,
+    cancelled: 0
+  };
+
+  statusCounts.forEach(item => {
+    counts[item._id] = item.count;
+  });
+
+  successResponse(res, {
+    meetings: filteredMeetings,
+    pagination: {
+      currentPage: page,
+      totalPages: Math.ceil(totalCount / limit),
+      totalItems: totalCount,
+      itemsPerPage: limit
+    },
+    statusCounts: counts
+  });
+});
+
+module.exports = { 
+  toggleShowSlots, 
+  getUserSlots, 
+  requestMeeting, 
+  respondToMeeting,
+  getUserMeetingsByDate,
+  cancelMeeting,
+  getAllMeetingsAdmin
+};
+
+
+// Admin: Get event slot bookings overview
+const getEventSlotBookings = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const Event = require('../models/Event');
+  const Exhibitor = require('../models/Exhibitor');
+  const Visitor = require('../models/Visitor');
+  const UserEventSlot = require('../models/UserEventSlot');
+
+  // Get event details
+  const event = await Event.findById(eventId).select('title fromDate toDate location');
+  if (!event) {
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  // Get all meetings for this event
+  const meetings = await Meeting.find({ eventId })
+    .sort({ slotStart: 1 });
+
+  // Get all user slots for this event
+  const userSlots = await UserEventSlot.find({ eventId });
+
+  // Get registered exhibitors and visitors
+  const registeredExhibitors = await Event.findById(eventId)
+    .populate('exhibitor.userId', 'companyName email phone profileImage')
+    .select('exhibitor');
+  
+  const registeredVisitors = await Event.findById(eventId)
+    .populate('visitor.userId', 'name email phone profileImage companyName')
+    .select('visitor');
+
+  // Process exhibitors with their slots and bookings
+  const exhibitorsWithSlots = await Promise.all(
+    (registeredExhibitors?.exhibitor || [])
+      // Show ALL exhibitors, not just verified ones
+      .map(async (exhibitor) => {
+        const userId = exhibitor.userId._id || exhibitor.userId;
+        
+        // Get user's slots
+        const userSlot = userSlots.find(
+          s => s.userId.toString() === userId.toString() && s.userType === 'exhibitor'
+        );
+
+        // Get meetings where this user is involved
+        const userMeetings = meetings.filter(
+          m => m.requesterId.toString() === userId.toString() || 
+               m.requestedId.toString() === userId.toString()
+        );
+
+        // Count slot statuses
+        const slotCounts = {
+          total: userSlot?.slots.length || 0,
+          available: 0,
+          requested: 0,
+          booked: 0,
+        };
+
+        if (userSlot) {
+          userSlot.slots.forEach(slot => {
+            if (slotCounts.hasOwnProperty(slot.status)) {
+              slotCounts[slot.status]++;
+            }
+          });
+        }
+
+        // Get meeting details
+        const meetingDetails = await Promise.all(
+          userMeetings.map(async (meeting) => {
+            let otherParticipant;
+            let otherParticipantType;
+            const isRequester = meeting.requesterId.toString() === userId.toString();
+
+            if (isRequester) {
+              otherParticipantType = meeting.requestedType;
+              if (meeting.requestedType === 'exhibitor') {
+                otherParticipant = await Exhibitor.findById(meeting.requestedId)
+                  .select('companyName email phone');
+              } else {
+                otherParticipant = await Visitor.findById(meeting.requestedId)
+                  .select('name email phone companyName');
+              }
+            } else {
+              otherParticipantType = meeting.requesterType;
+              if (meeting.requesterType === 'exhibitor') {
+                otherParticipant = await Exhibitor.findById(meeting.requesterId)
+                  .select('companyName email phone');
+              } else {
+                otherParticipant = await Visitor.findById(meeting.requesterId)
+                  .select('name email phone companyName');
+              }
+            }
+
+            return {
+              _id: meeting._id,
+              slotStart: meeting.slotStart,
+              slotEnd: meeting.slotEnd,
+              status: meeting.status,
+              isRequester,
+              otherParticipant: {
+                name: otherParticipant?.companyName || otherParticipant?.name || 'Unknown',
+                type: otherParticipantType,
+                email: otherParticipant?.email,
+                phone: otherParticipant?.phone,
+              },
+            };
+          })
+        );
+
+        return {
+          _id: userId,
+          name: exhibitor.userId.companyName || 'Unknown',
+          email: exhibitor.userId.email,
+          phone: exhibitor.userId.phone,
+          profileImage: exhibitor.userId.profileImage,
+          type: 'exhibitor',
+          registeredAt: exhibitor.registeredAt,
+          qrCode: exhibitor.qrCode,
+          isVerified: exhibitor.isVerified, // Add verification status
+          showSlots: userSlot?.showSlots || false,
+          slotCounts,
+          meetings: meetingDetails,
+        };
+      })
+  );
+
+  // Process visitors with their slots and bookings
+  const visitorsWithSlots = await Promise.all(
+    (registeredVisitors?.visitor || [])
+      // Show ALL visitors, not just verified ones
+      .map(async (visitor) => {
+        const userId = visitor.userId._id || visitor.userId;
+        
+        // Get user's slots
+        const userSlot = userSlots.find(
+          s => s.userId.toString() === userId.toString() && s.userType === 'visitor'
+        );
+
+        // Get meetings where this user is involved
+        const userMeetings = meetings.filter(
+          m => m.requesterId.toString() === userId.toString() || 
+               m.requestedId.toString() === userId.toString()
+        );
+
+        // Count slot statuses
+        const slotCounts = {
+          total: userSlot?.slots.length || 0,
+          available: 0,
+          requested: 0,
+          booked: 0,
+        };
+
+        if (userSlot) {
+          userSlot.slots.forEach(slot => {
+            if (slotCounts.hasOwnProperty(slot.status)) {
+              slotCounts[slot.status]++;
+            }
+          });
+        }
+
+        // Get meeting details
+        const meetingDetails = await Promise.all(
+          userMeetings.map(async (meeting) => {
+            let otherParticipant;
+            let otherParticipantType;
+            const isRequester = meeting.requesterId.toString() === userId.toString();
+
+            if (isRequester) {
+              otherParticipantType = meeting.requestedType;
+              if (meeting.requestedType === 'exhibitor') {
+                otherParticipant = await Exhibitor.findById(meeting.requestedId)
+                  .select('companyName email phone');
+              } else {
+                otherParticipant = await Visitor.findById(meeting.requestedId)
+                  .select('name email phone companyName');
+              }
+            } else {
+              otherParticipantType = meeting.requesterType;
+              if (meeting.requesterType === 'exhibitor') {
+                otherParticipant = await Exhibitor.findById(meeting.requesterId)
+                  .select('companyName email phone');
+              } else {
+                otherParticipant = await Visitor.findById(meeting.requesterId)
+                  .select('name email phone companyName');
+              }
+            }
+
+            return {
+              _id: meeting._id,
+              slotStart: meeting.slotStart,
+              slotEnd: meeting.slotEnd,
+              status: meeting.status,
+              isRequester,
+              otherParticipant: {
+                name: otherParticipant?.companyName || otherParticipant?.name || 'Unknown',
+                type: otherParticipantType,
+                email: otherParticipant?.email,
+                phone: otherParticipant?.phone,
+              },
+            };
+          })
+        );
+
+        return {
+          _id: userId,
+          name: visitor.userId.name || visitor.userId.companyName || 'Unknown',
+          email: visitor.userId.email,
+          phone: visitor.userId.phone,
+          profileImage: visitor.userId.profileImage,
+          type: 'visitor',
+          registeredAt: visitor.registeredAt,
+          qrCode: visitor.qrCode,
+          isVerified: visitor.isVerified, // Add verification status
+          showSlots: userSlot?.showSlots || false,
+          slotCounts,
+          meetings: meetingDetails,
+        };
+      })
+  );
+
+  // Calculate summary statistics
+  const summary = {
+    totalExhibitors: exhibitorsWithSlots.length,
+    totalVisitors: visitorsWithSlots.length,
+    totalMeetings: meetings.length,
+    meetingsByStatus: {
+      pending: meetings.filter(m => m.status === 'pending').length,
+      accepted: meetings.filter(m => m.status === 'accepted').length,
+      rejected: meetings.filter(m => m.status === 'rejected').length,
+      cancelled: meetings.filter(m => m.status === 'cancelled').length,
+    },
+    totalSlotsAvailable: userSlots.reduce((sum, us) => sum + us.slots.filter(s => s.status === 'available').length, 0),
+    totalSlotsBooked: userSlots.reduce((sum, us) => sum + us.slots.filter(s => s.status === 'booked').length, 0),
+  };
+
+  successResponse(res, {
+    event: {
+      _id: event._id,
+      title: event.title,
+      fromDate: event.fromDate,
+      toDate: event.toDate,
+      location: event.location,
+    },
+    summary,
+    exhibitors: exhibitorsWithSlots,
+    visitors: visitorsWithSlots,
+  });
+});
+
+module.exports = { 
+  toggleShowSlots, 
+  getUserSlots, 
+  requestMeeting, 
+  respondToMeeting,
+  getUserMeetingsByDate,
+  cancelMeeting,
+  getAllMeetingsAdmin,
+  getEventSlotBookings
+};

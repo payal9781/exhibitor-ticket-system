@@ -615,6 +615,32 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event ID, scanned user ID, and user type are required', 400);
   }
 
+  // Check if event exists
+  const event = await Event.findById(eventId);
+  if (!event) {
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  const currentDate = new Date();
+  const eventEndDate = new Date(event.toDate);
+  
+  // If event has ended, return empty slots
+  if (eventEndDate < currentDate) {
+    return successResponse(res, {
+      scannedUser: null,
+      scannedUserType,
+      eventId,
+      totalSlots: 0,
+      statusCounts: { available: 0, requested: 0, booked: 0 },
+      slotsByDate: {},
+      attendedDates: [],
+      attendanceInfo: {
+        totalAttendedDays: 0,
+        message: 'Event has ended'
+      }
+    });
+  }
+
   // Verify that the current user has scanned this user
   const scanRecord = await Scan.findOne({
     scanner: currentUserId,
@@ -637,7 +663,7 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
     return errorResponse(res, 'User slots not available or hidden', 403);
   }
 
-  // Get attendance records for the scanned user for this event
+  // Get attendance records for the scanned user for this event (for informational purposes only)
   const attendanceRecords = await Attendance.find({
     userId: scannedUserId,
     eventId: eventId
@@ -645,20 +671,18 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
 
   const attendedDates = new Set();
 
-attendanceRecords.forEach(record => {
-  const date = record.attendanceDate;
-  // Extract local date in YYYY-MM-DD format
-  const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-  attendedDates.add(dateKey);
-});
+  attendanceRecords.forEach(record => {
+    const date = record.attendanceDate;
+    // Extract local date in YYYY-MM-DD format
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    attendedDates.add(dateKey);
+  });
 
-// Filter slots to only show those on attended dates (all statuses)
-const filteredSlots = userSlots.slots.filter(slot => {
-  const slotDate = slot.start;
-  // Extract local date in YYYY-MM-DD format
-  const slotDateKey = `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, '0')}-${String(slotDate.getDate()).padStart(2, '0')}`;
-  return attendedDates.has(slotDateKey);
-});
+  // Filter out past slots - only show future slots
+  const filteredSlots = userSlots.slots.filter(slot => {
+    const slotStartDate = new Date(slot.start);
+    return slotStartDate >= currentDate;
+  });
 
   // Group slots by date with color indicators
   const slotsByDate = {};
@@ -726,6 +750,24 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
 
   if (!eventId || !requestedId || !requestedType || !slotStart || !slotEnd) {
     return errorResponse(res, 'All fields are required', 400);
+  }
+
+  // Check if event exists and hasn't ended
+  const event = await Event.findById(eventId);
+  if (!event) {
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  const currentDate = new Date();
+  const eventEndDate = new Date(event.toDate);
+  if (eventEndDate < currentDate) {
+    return errorResponse(res, 'Cannot book meetings for ended events', 400);
+  }
+
+  // Check if the slot time is in the past
+  const slotStartDate = new Date(slotStart);
+  if (slotStartDate < currentDate) {
+    return errorResponse(res, 'Cannot book meetings for past time slots', 400);
   }
 
   // Verify that the requester has scanned the requested user
@@ -1193,6 +1235,26 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event ID is required', 400);
   }
 
+  // Check if event exists
+  const event = await Event.findById(eventId);
+  if (!event) {
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  const currentDate = new Date();
+  const eventEndDate = new Date(event.toDate);
+  
+  // If event has ended, return empty slots
+  if (eventEndDate < currentDate) {
+    return successResponse(res, {
+      eventId,
+      showSlots: false,
+      totalSlots: 0,
+      statusCounts: { available: 0, requested: 0, booked: 0 },
+      slotsByDate: {}
+    });
+  }
+
   const userSlot = await UserEventSlot.findOne({
     userId,
     userType,
@@ -1202,6 +1264,12 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
   if (!userSlot) {
     return errorResponse(res, 'User slots not found for this event', 404);
   }
+
+  // Filter out past slots - only show future slots
+  const futureSlots = userSlot.slots.filter(slot => {
+    const slotStartDate = new Date(slot.start);
+    return slotStartDate >= currentDate;
+  });
 
   // Group slots by date and status with color coding
   const slotsByDate = {};
@@ -1217,7 +1285,7 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
     'booked': 'red'         // Confirmed meeting
   };
 
-  userSlot.slots.forEach(slot => {
+  futureSlots.forEach(slot => {
     const dateKey = slot.start.toISOString().split('T')[0];
     if (!slotsByDate[dateKey]) {
       slotsByDate[dateKey] = {
@@ -1245,7 +1313,7 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
   successResponse(res, {
     eventId,
     showSlots: userSlot.showSlots,
-    totalSlots: userSlot.slots.length,
+    totalSlots: futureSlots.length,
     statusCounts,
     slotsByDate
   });
@@ -1385,6 +1453,7 @@ const getAllUsersForEvent = asyncHandler(async (req, res) => {
     {
       $project: {
         _id: '$user._id',
+        name: '$user.name',
         companyName: '$user.companyName',
         email: '$user.email',
         phone: '$user.phone',
