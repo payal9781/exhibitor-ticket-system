@@ -33,7 +33,6 @@ function formatTrendText(current, previous, period = 'month') {
 const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
   const organizerId = req.user.id;
   // Support both GET (query params) and POST (body) requests
-  // Handle filters nested in body or directly in body/query
   let filters = {};
   if (req.method === 'POST') {
     filters = req.body?.filters || req.body || {};
@@ -42,35 +41,20 @@ const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
   }
   const { startDate, endDate, categoryId } = filters;
   
-  // Build base query
-  let eventQuery = { 
+  // Build base query for all organizer events
+  let eventBaseQuery = { 
     organizerId, 
     isDeleted: false 
   };
   
-  // Apply date range filter
-  if (startDate || endDate) {
-    eventQuery.createdAt = {};
-    if (startDate) {
-      eventQuery.createdAt.$gte = new Date(startDate);
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      eventQuery.createdAt.$lte = end;
-    }
-  }
-  
-  // Get events matching query
-  let events = await Event.find(eventQuery);
+  let matchingEvents = await Event.find(eventBaseQuery);
   
   // Apply category filter if provided
   if (categoryId) {
-    // Get category value from categoryId
     const category = await Category.findById(categoryId);
     if (category) {
       const categoryValue = category.value;
-      events = events.filter(event => {
+      matchingEvents = matchingEvents.filter(event => {
         if (!event.schedules || !Array.isArray(event.schedules)) return false;
         return event.schedules.some(schedule => 
           schedule.activities && schedule.activities.some(activity => 
@@ -81,140 +65,149 @@ const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
     }
   }
   
-  const eventIds = events.map(e => e._id);
+  const matchingEventIds = matchingEvents.map(e => e._id);
   
-  // Get total events
-  const totalEvents = eventIds.length;
+  // Date filter for specific metrics
+  const dateFilter = {};
+  if (startDate) dateFilter.$gte = new Date(startDate);
+  if (endDate) {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    dateFilter.$lte = end;
+  }
+
+  // 1. Total Events in period
+  let eventPeriodQuery = { _id: { $in: matchingEventIds }, isDeleted: false };
+  if (Object.keys(dateFilter).length > 0) eventPeriodQuery.createdAt = dateFilter;
+  const totalEvents = await Event.countDocuments(eventPeriodQuery);
   
-  // Calculate current month period
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
-  const endOfMonth = new Date();
-  endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-  endOfMonth.setDate(0);
-  endOfMonth.setHours(23, 59, 59, 999);
-  
-  // Get events created this month
-  const eventsThisMonth = events.filter(e => {
-    const created = new Date(e.createdAt);
-    return created >= startOfMonth && created <= endOfMonth;
-  }).length;
-  
-  // Calculate previous month period
-  const startOfPreviousMonth = new Date(startOfMonth);
-  startOfPreviousMonth.setMonth(startOfPreviousMonth.getMonth() - 1);
-  const endOfPreviousMonth = new Date(startOfMonth);
-  endOfPreviousMonth.setDate(0);
-  endOfPreviousMonth.setHours(23, 59, 59, 999);
-  
-  // Get events created in previous month
-  const eventsPreviousMonth = events.filter(e => {
-    const created = new Date(e.createdAt);
-    return created >= startOfPreviousMonth && created <= endOfPreviousMonth;
-  }).length;
-  
-  // Get all events for this organizer with populated exhibitors and visitors
-  const eventsWithDetails = await Event.find({ 
-    _id: { $in: eventIds },
-    organizerId, 
-    isDeleted: false 
-  }).populate('exhibitor.userId visitor.userId');
-  
-  // Count unique exhibitors and visitors across all events
-  const uniqueExhibitors = new Set();
-  const uniqueVisitors = new Set();
+  // Calculate time periods
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfPreviousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const endOfPreviousMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
   
   const startOfWeek = new Date();
-  startOfWeek.setDate(startOfWeek.getDate() - 7);
-  startOfWeek.setHours(0, 0, 0, 0);
-  
+  startOfWeek.setDate(now.getDate() - 7);
   const startOfPreviousWeek = new Date(startOfWeek);
-  startOfPreviousWeek.setDate(startOfPreviousWeek.getDate() - 7);
+  startOfPreviousWeek.setDate(startOfWeek.getDate() - 7);
   
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  
   const startOfPreviousDay = new Date(startOfDay);
-  startOfPreviousDay.setDate(startOfPreviousDay.getDate() - 1);
+  startOfPreviousDay.setDate(startOfDay.getDate() - 1);
+
+  // Fetch details for filtering registrations
+  const eventsWithDetails = await Event.find({ 
+    _id: { $in: matchingEventIds },
+    isDeleted: false 
+  }).populate('exhibitor.userId visitor.userId');
   
-  let exhibitorsThisWeek = 0;
-  let exhibitorsPreviousWeek = 0;
-  let visitorsToday = 0;
-  let visitorsPreviousDay = 0;
+  const uniqueExhibitors = new Set();
+  const uniqueVisitors = new Set();
+  const sectorCounts = {};
+  const eventEngagement = [];
   
   for (const event of eventsWithDetails) {
-    // Count unique exhibitors
-    if (event.exhibitor && Array.isArray(event.exhibitor)) {
-      event.exhibitor.forEach(exhibitorEntry => {
-        if (exhibitorEntry && exhibitorEntry.userId) {
-          const exhibitor = exhibitorEntry.userId;
-          if (exhibitor && !exhibitor.isDeleted) {
-            uniqueExhibitors.add(exhibitor._id.toString());
-            const regDate = new Date(exhibitorEntry.registeredAt || exhibitor.createdAt);
-            if (regDate >= startOfWeek) {
-              exhibitorsThisWeek++;
-            } else if (regDate >= startOfPreviousWeek && regDate < startOfWeek) {
-              exhibitorsPreviousWeek++;
-            }
+    let exhibitorsInEventInPeriod = 0;
+    let visitorsInEventInPeriod = 0;
+
+    if (event.exhibitor) {
+      event.exhibitor.forEach(entry => {
+        if (entry.userId && !entry.userId.isDeleted) {
+          const regDate = new Date(entry.registeredAt || entry.userId.createdAt);
+          let inRange = true;
+          if (startDate && regDate < new Date(startDate)) inRange = false;
+          if (endDate && regDate > new Date(endDate)) inRange = false;
+          
+          if (inRange) {
+            uniqueExhibitors.add(entry.userId._id.toString());
+            exhibitorsInEventInPeriod++;
+            
+            // Track sectors (for filtered exhibitors)
+            const sector = entry.userId.Sector || 'Other';
+            sectorCounts[sector] = (sectorCounts[sector] || 0) + 1;
           }
         }
       });
     }
     
-    // Count unique visitors
-    if (event.visitor && Array.isArray(event.visitor)) {
-      event.visitor.forEach(visitorEntry => {
-        if (visitorEntry && visitorEntry.userId) {
-          const visitor = visitorEntry.userId;
-          if (visitor && !visitor.isDeleted) {
-            uniqueVisitors.add(visitor._id.toString());
-            const regDate = new Date(visitorEntry.registeredAt || visitor.createdAt);
-            if (regDate >= startOfDay) {
-              visitorsToday++;
-            } else if (regDate >= startOfPreviousDay && regDate < startOfDay) {
-              visitorsPreviousDay++;
-            }
+    if (event.visitor) {
+      event.visitor.forEach(entry => {
+        if (entry.userId && !entry.userId.isDeleted) {
+          const regDate = new Date(entry.registeredAt || entry.userId.createdAt);
+          let inRange = true;
+          if (startDate && regDate < new Date(startDate)) inRange = false;
+          if (endDate && regDate > new Date(endDate)) inRange = false;
+          
+          if (inRange) {
+            uniqueVisitors.add(entry.userId._id.toString());
+            visitorsInEventInPeriod++;
           }
         }
       });
     }
+
+    eventEngagement.push({
+      title: event.title,
+      exhibitors: exhibitorsInEventInPeriod,
+      visitors: visitorsInEventInPeriod,
+      total: exhibitorsInEventInPeriod + visitorsInEventInPeriod
+    });
   }
   
-  const totalExhibitors = uniqueExhibitors.size;
-  const totalVisitors = uniqueVisitors.size;
+  const totalExhibitorsCount = uniqueExhibitors.size;
+  const totalVisitorsCount = uniqueVisitors.size;
   
-  // Calculate revenue (mock calculation - you can implement actual revenue logic)
-  const revenue = totalEvents * 1500 + totalExhibitors * 200 + totalVisitors * 50;
-  const lastMonthRevenue = revenue * 0.89; // Mock 12% increase
-  const revenueIncrease = ((revenue - lastMonthRevenue) / lastMonthRevenue * 100).toFixed(1);
-  
+  // 3. Total Scans in period
+  let scanQuery = { eventId: { $in: matchingEventIds } };
+  if (Object.keys(dateFilter).length > 0) scanQuery.createdAt = dateFilter;
+  const totalScans = await Scan.countDocuments(scanQuery);
+
+  // Prepare sector data for charts
+  const sectorData = Object.entries(sectorCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+
+  // Prepare top events data
+  const topEvents = eventEngagement
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+
+  // Calculate trends (always relative to NOW)
+  const eventsThisMonth = await Event.countDocuments({ _id: { $in: matchingEventIds }, createdAt: { $gte: startOfMonth } });
+  const eventsPrevMonth = await Event.countDocuments({ _id: { $in: matchingEventIds }, createdAt: { $gte: startOfPreviousMonth, $lt: startOfMonth } });
+
   const stats = {
     totalEvents: {
       value: totalEvents,
-      trend: formatTrendText(eventsThisMonth, eventsPreviousMonth, 'month'),
-      trendUp: eventsThisMonth >= eventsPreviousMonth,
-      previousMonthValue: eventsPreviousMonth,
-      percentageChange: parseFloat(calculatePercentageChange(eventsThisMonth, eventsPreviousMonth))
+      trend: formatTrendText(eventsThisMonth, eventsPrevMonth, 'month'),
+      trendUp: eventsThisMonth >= eventsPrevMonth,
+      percentageChange: parseFloat(calculatePercentageChange(eventsThisMonth, eventsPrevMonth))
     },
     activeExhibitors: {
-      value: totalExhibitors,
-      trend: formatTrendText(exhibitorsThisWeek, exhibitorsPreviousWeek, 'week'),
-      trendUp: exhibitorsThisWeek >= exhibitorsPreviousWeek,
-      previousWeekValue: exhibitorsPreviousWeek,
-      percentageChange: parseFloat(calculatePercentageChange(exhibitorsThisWeek, exhibitorsPreviousWeek))
+      value: totalExhibitorsCount,
+      trend: 'In selected period',
+      trendUp: true
     },
     registeredVisitors: {
-      value: totalVisitors,
-      trend: formatTrendText(visitorsToday, visitorsPreviousDay, 'day'),
-      trendUp: visitorsToday >= visitorsPreviousDay,
-      previousDayValue: visitorsPreviousDay,
-      percentageChange: parseFloat(calculatePercentageChange(visitorsToday, visitorsPreviousDay))
+      value: totalVisitorsCount,
+      trend: 'In selected period',
+      trendUp: true
     },
-    revenue: {
-      value: `$${revenue.toLocaleString()}`,
-      trend: `+${revenueIncrease}% vs last month`,
-      trendUp: parseFloat(revenueIncrease) > 0
+    engagement: {
+      value: totalScans,
+      trend: 'Total scans in period',
+      trendUp: true
+    },
+    insights: {
+      sectorDistribution: sectorData,
+      topEvents: topEvents,
+      engagementOverview: {
+        totalScans,
+        periodScans: totalScans
+      }
     }
   };
   
@@ -224,7 +217,6 @@ const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
 // Get dashboard stats for super admin
 const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
   // Support both GET (query params) and POST (body) requests
-  // Handle filters nested in body or directly in body/query
   let filters = {};
   if (req.method === 'POST') {
     filters = req.body?.filters || req.body || {};
@@ -233,67 +225,18 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
   }
   const { startDate, endDate, organizerId, categoryId } = filters;
   
-  // Build base queries
-  let organizerQuery = { isDeleted: false };
-  let eventQuery = { isDeleted: false };
+  // Build base query for events to filter by category/organizer
+  let eventBaseQuery = { isDeleted: false };
+  if (organizerId) eventBaseQuery.organizerId = organizerId;
   
-  // Apply date range filter
-  if (startDate || endDate) {
-    const dateFilter = {};
-    if (startDate) {
-      dateFilter.$gte = new Date(startDate);
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      dateFilter.$lte = end;
-    }
-    organizerQuery.createdAt = dateFilter;
-    eventQuery.createdAt = dateFilter;
-  }
-  
-  // Apply organizer filter
-  if (organizerId) {
-    eventQuery.organizerId = organizerId;
-  }
-  
-  // Get total organizers
-  const totalOrganizers = await Organizer.countDocuments(organizerQuery);
-  
-  // Calculate current month period
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
-  const endOfMonth = new Date();
-  endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-  endOfMonth.setDate(0);
-  endOfMonth.setHours(23, 59, 59, 999);
-  
-  // Get organizers created this month
-  const organizersThisMonthQuery = { ...organizerQuery, createdAt: { $gte: startOfMonth, $lte: endOfMonth } };
-  const organizersThisMonth = await Organizer.countDocuments(organizersThisMonthQuery);
-  
-  // Calculate previous month period
-  const startOfPreviousMonth = new Date(startOfMonth);
-  startOfPreviousMonth.setMonth(startOfPreviousMonth.getMonth() - 1);
-  const endOfPreviousMonth = new Date(startOfMonth);
-  endOfPreviousMonth.setDate(0);
-  endOfPreviousMonth.setHours(23, 59, 59, 999);
-  
-  // Get organizers created in previous month
-  const organizersPreviousMonthQuery = { ...organizerQuery, createdAt: { $gte: startOfPreviousMonth, $lte: endOfPreviousMonth } };
-  const organizersPreviousMonth = await Organizer.countDocuments(organizersPreviousMonthQuery);
-  
-  // Get events matching query
-  let events = await Event.find(eventQuery);
+  let matchingEvents = await Event.find(eventBaseQuery);
   
   // Apply category filter if provided
   if (categoryId) {
-    // Get category value from categoryId
     const category = await Category.findById(categoryId);
     if (category) {
       const categoryValue = category.value;
-      events = events.filter(event => {
+      matchingEvents = matchingEvents.filter(event => {
         if (!event.schedules || !Array.isArray(event.schedules)) return false;
         return event.schedules.some(schedule => 
           schedule.activities && schedule.activities.some(activity => 
@@ -303,143 +246,146 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
       });
     }
   }
+
+  const matchingEventIds = matchingEvents.map(e => e._id);
   
-  const eventIds = events.map(e => e._id);
-  const totalEvents = eventIds.length;
-  
-  // Get events created this month
-  const eventsThisMonth = events.filter(e => {
-    const created = new Date(e.createdAt);
-    return created >= startOfMonth && created <= endOfMonth;
-  }).length;
-  
-  // Get events created in previous month
-  const eventsPreviousMonth = events.filter(e => {
-    const created = new Date(e.createdAt);
-    return created >= startOfPreviousMonth && created <= endOfPreviousMonth;
-  }).length;
-  
-  // Get total active users (exhibitors + visitors + organizers)
-  let exhibitorQuery = { isDeleted: false, isActive: true };
-  let visitorQuery = { isDeleted: false, isActive: true };
-  let activeOrganizerQuery = { isDeleted: false, isActive: true };
-  
-  // Apply date filter for users if provided
-  if (startDate || endDate) {
-    const userDateFilter = {};
-    if (startDate) {
-      userDateFilter.$gte = new Date(startDate);
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      userDateFilter.$lte = end;
-    }
-    exhibitorQuery.createdAt = userDateFilter;
-    visitorQuery.createdAt = userDateFilter;
-    activeOrganizerQuery.createdAt = userDateFilter;
+  // Date filter for specific metrics
+  const dateFilter = {};
+  if (startDate) dateFilter.$gte = new Date(startDate);
+  if (endDate) {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    dateFilter.$lte = end;
   }
+
+  // 1. Total Events in period
+  let eventPeriodQuery = { _id: { $in: matchingEventIds }, isDeleted: false };
+  if (Object.keys(dateFilter).length > 0) eventPeriodQuery.createdAt = dateFilter;
+  const totalEvents = await Event.countDocuments(eventPeriodQuery);
+
+  // 2. Total Organizers in period
+  let organizerPeriodQuery = { isDeleted: false };
+  if (Object.keys(dateFilter).length > 0) organizerPeriodQuery.createdAt = dateFilter;
+  const totalOrganizers = await Organizer.countDocuments(organizerPeriodQuery);
+
+  // 3. Total Exhibitors/Visitors in period (from matching events)
+  let uniqueExhibitors = new Set();
+  let uniqueVisitors = new Set();
   
-  const totalExhibitors = await Exhibitor.countDocuments(exhibitorQuery);
-  const totalVisitors = await Visitor.countDocuments(visitorQuery);
-  const totalActiveOrganizers = await Organizer.countDocuments(activeOrganizerQuery);
-  const activeUsers = totalExhibitors + totalVisitors + totalActiveOrganizers;
+  // Fetch all registrations for matching events to filter by date
+  const eventsWithDetails = await Event.find({ _id: { $in: matchingEventIds } }).populate('exhibitor.userId visitor.userId');
   
-  // Calculate current week period
-  const startOfWeek = new Date();
-  startOfWeek.setDate(startOfWeek.getDate() - 7);
-  startOfWeek.setHours(0, 0, 0, 0);
-  const endOfWeek = new Date();
-  endOfWeek.setHours(23, 59, 59, 999);
+  const eventEngagement = [];
   
-  // Calculate previous week period
-  const startOfPreviousWeek = new Date(startOfWeek);
-  startOfPreviousWeek.setDate(startOfPreviousWeek.getDate() - 7);
-  const endOfPreviousWeek = new Date(startOfWeek);
-  endOfPreviousWeek.setDate(endOfPreviousWeek.getDate() - 1);
-  endOfPreviousWeek.setHours(23, 59, 59, 999);
+  for (const event of eventsWithDetails) {
+    let exhibitorsInPeriod = 0;
+    let visitorsInPeriod = 0;
+
+    event.exhibitor?.forEach(e => {
+      if (e.userId && !e.userId.isDeleted) {
+        const regDate = new Date(e.registeredAt || e.userId.createdAt);
+        let inRange = true;
+        if (startDate && regDate < new Date(startDate)) inRange = false;
+        if (endDate && regDate > new Date(endDate)) inRange = false;
+        if (inRange) {
+          uniqueExhibitors.add(e.userId._id.toString());
+          exhibitorsInPeriod++;
+        }
+      }
+    });
+    event.visitor?.forEach(v => {
+      if (v.userId && !v.userId.isDeleted) {
+        const regDate = new Date(v.registeredAt || v.userId.createdAt);
+        let inRange = true;
+        if (startDate && regDate < new Date(startDate)) inRange = false;
+        if (endDate && regDate > new Date(endDate)) inRange = false;
+        if (inRange) {
+          uniqueVisitors.add(v.userId._id.toString());
+          visitorsInPeriod++;
+        }
+      }
+    });
+
+    eventEngagement.push({
+      title: event.title,
+      exhibitors: exhibitorsInPeriod,
+      visitors: visitorsInPeriod,
+      total: exhibitorsInPeriod + visitorsInPeriod
+    });
+  }
+
+  const totalExhibitorsCount = uniqueExhibitors.size;
+  const totalVisitorsCount = uniqueVisitors.size;
+  const activeUsers = totalExhibitorsCount + totalVisitorsCount + totalOrganizers;
+
+  // 4. Total Scans in period
+  let scanQuery = { eventId: { $in: matchingEventIds } };
+  if (Object.keys(dateFilter).length > 0) scanQuery.createdAt = dateFilter;
+  const totalScans = await Scan.countDocuments(scanQuery);
+
+  // Calculate trends (always based on current time for growth perspective)
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfPreviousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   
-  // Get users created this week
-  const exhibitorsThisWeek = await Exhibitor.countDocuments({
-    ...exhibitorQuery,
-    createdAt: { $gte: startOfWeek, $lte: endOfWeek }
-  });
+  const eventsThisMonth = await Event.countDocuments({ _id: { $in: matchingEventIds }, createdAt: { $gte: startOfMonth } });
+  const eventsPrevMonth = await Event.countDocuments({ _id: { $in: matchingEventIds }, createdAt: { $gte: startOfPreviousMonth, $lt: startOfMonth } });
   
-  const visitorsThisWeek = await Visitor.countDocuments({
-    ...visitorQuery,
-    createdAt: { $gte: startOfWeek, $lte: endOfWeek }
-  });
+  const orgsThisMonth = await Organizer.countDocuments({ createdAt: { $gte: startOfMonth } });
+  const orgsPrevMonth = await Organizer.countDocuments({ createdAt: { $gte: startOfPreviousMonth, $lt: startOfMonth } });
+
+  // Sector Trends (filtered by date)
+  const sectorMatch = { isDeleted: false };
+  if (Object.keys(dateFilter).length > 0) sectorMatch.createdAt = dateFilter;
   
-  const organizersThisWeek = await Organizer.countDocuments({
-    ...activeOrganizerQuery,
-    createdAt: { $gte: startOfWeek, $lte: endOfWeek }
-  });
-  
-  const usersThisWeek = exhibitorsThisWeek + visitorsThisWeek + organizersThisWeek;
-  
-  // Get users created in previous week
-  const exhibitorsPreviousWeek = await Exhibitor.countDocuments({
-    ...exhibitorQuery,
-    createdAt: { $gte: startOfPreviousWeek, $lte: endOfPreviousWeek }
-  });
-  
-  const visitorsPreviousWeek = await Visitor.countDocuments({
-    ...visitorQuery,
-    createdAt: { $gte: startOfPreviousWeek, $lte: endOfPreviousWeek }
-  });
-  
-  const organizersPreviousWeek = await Organizer.countDocuments({
-    ...activeOrganizerQuery,
-    createdAt: { $gte: startOfPreviousWeek, $lte: endOfPreviousWeek }
-  });
-  
-  const usersPreviousWeek = exhibitorsPreviousWeek + visitorsPreviousWeek + organizersPreviousWeek;
-  
-  // Calculate platform revenue (mock calculation)
-  const platformRevenue = totalEvents * 500 + totalOrganizers * 2000 + activeUsers * 25;
-  const lastMonthRevenue = platformRevenue * 0.81; // Mock 23% increase
-  const revenueIncrease = ((platformRevenue - lastMonthRevenue) / lastMonthRevenue * 100).toFixed(1);
-  
+  const sectorTrends = await Exhibitor.aggregate([
+    { $match: sectorMatch },
+    { $group: { _id: '$Sector', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: 5 }
+  ]);
+
   const stats = {
     totalOrganizers: {
       value: totalOrganizers,
-      trend: formatTrendText(organizersThisMonth, organizersPreviousMonth, 'month'),
-      trendUp: organizersThisMonth >= organizersPreviousMonth,
-      previousMonthValue: organizersPreviousMonth,
-      percentageChange: parseFloat(calculatePercentageChange(organizersThisMonth, organizersPreviousMonth))
+      trend: formatTrendText(orgsThisMonth, orgsPrevMonth, 'month'),
+      trendUp: orgsThisMonth >= orgsPrevMonth,
+      percentageChange: parseFloat(calculatePercentageChange(orgsThisMonth, orgsPrevMonth))
     },
     totalEvents: {
       value: totalEvents,
-      trend: formatTrendText(eventsThisMonth, eventsPreviousMonth, 'month'),
-      trendUp: eventsThisMonth >= eventsPreviousMonth,
-      previousMonthValue: eventsPreviousMonth,
-      percentageChange: parseFloat(calculatePercentageChange(eventsThisMonth, eventsPreviousMonth))
+      trend: formatTrendText(eventsThisMonth, eventsPrevMonth, 'month'),
+      trendUp: eventsThisMonth >= eventsPrevMonth,
+      percentageChange: parseFloat(calculatePercentageChange(eventsThisMonth, eventsPrevMonth))
     },
     activeUsers: {
       value: activeUsers,
-      trend: formatTrendText(usersThisWeek, usersPreviousWeek, 'week'),
-      trendUp: usersThisWeek >= usersPreviousWeek,
-      previousWeekValue: usersPreviousWeek,
-      percentageChange: parseFloat(calculatePercentageChange(usersThisWeek, usersPreviousWeek))
+      trend: `${activeUsers.toLocaleString()} total platform users`,
+      trendUp: true
     },
     totalExhibitors: {
-      value: totalExhibitors,
-      trend: formatTrendText(exhibitorsThisWeek, exhibitorsPreviousWeek, 'week'),
-      trendUp: exhibitorsThisWeek >= exhibitorsPreviousWeek,
-      previousWeekValue: exhibitorsPreviousWeek,
-      percentageChange: parseFloat(calculatePercentageChange(exhibitorsThisWeek, exhibitorsPreviousWeek))
+      value: totalExhibitorsCount,
+      trend: 'From filtered events',
+      trendUp: true
     },
     totalVisitors: {
-      value: totalVisitors,
-      trend: formatTrendText(visitorsThisWeek, visitorsPreviousWeek, 'week'),
-      trendUp: visitorsThisWeek >= visitorsPreviousWeek,
-      previousWeekValue: visitorsPreviousWeek,
-      percentageChange: parseFloat(calculatePercentageChange(visitorsThisWeek, visitorsPreviousWeek))
+      value: totalVisitorsCount,
+      trend: 'From filtered events',
+      trendUp: true
     },
-    platformRevenue: {
-      value: `$${platformRevenue.toLocaleString()}`,
-      trend: `+${revenueIncrease}% vs last month`,
-      trendUp: parseFloat(revenueIncrease) > 0
+    engagement: {
+      value: totalScans,
+      trend: 'Total platform scans',
+      trendUp: true
+    },
+    insights: {
+      globalSectorTrends: sectorTrends.map(s => ({ name: s._id || 'Other', value: s.count })),
+      topEvents: eventEngagement.sort((a, b) => b.total - a.total).slice(0, 5),
+      platformGrowth: {
+        totalExhibitors: totalExhibitorsCount,
+        totalVisitors: totalVisitorsCount,
+        totalScans
+      }
     }
   };
   
@@ -455,15 +401,17 @@ const getRecentActivity = asyncHandler(async (req, res) => {
     filters = req.query || {};
   }
   
-  const { startDate, endDate } = filters;
+  const { startDate, endDate, categoryId, organizerId } = filters;
   const userType = req.user?.type;
   const userId = req.user?.id;
 
-  console.log(`[RecentActivity] Request from ${userType} (ID: ${userId})`);
-  
   const activities = [];
   
-  // Build date filter
+  // Build base filters
+  let eventQuery = { isDeleted: false };
+  if (userType === 'organizer') eventQuery.organizerId = userId;
+  else if (organizerId) eventQuery.organizerId = organizerId;
+
   const dateFilter = {};
   if (startDate || endDate) {
     if (startDate) dateFilter.$gte = new Date(startDate);
@@ -472,88 +420,49 @@ const getRecentActivity = asyncHandler(async (req, res) => {
       end.setHours(23, 59, 59, 999);
       dateFilter.$lte = end;
     }
+    eventQuery.updatedAt = dateFilter;
   }
 
-  let recentEvents = [];
-  let recentExhibitors = [];
-  let recentVisitors = [];
-
-  if (userType === 'organizer') {
-    // --- ORGANIZER SCOPE: Strict Data Isolation ---
-    const organizerId = userId;
-    
-    // 1. Get recent events for this organizer
-    let eventQuery = { organizerId, isDeleted: false };
-    if (Object.keys(dateFilter).length > 0) eventQuery.updatedAt = dateFilter;
-    
-    recentEvents = await Event.find(eventQuery)
-      .sort({ updatedAt: -1 })
-      .limit(10)
-      .select('title updatedAt createdAt');
-
-    // 2. Get recent exhibitors/visitors specifically for this organizer's events
-    const organizerEvents = await Event.find({ 
-      organizerId, 
-      isDeleted: false 
-    }).select('exhibitor visitor');
-
-    const exhibitorIds = new Set();
-    const visitorIds = new Set();
-
-    organizerEvents.forEach(event => {
-      if (event.exhibitor) event.exhibitor.forEach(e => {
-        if (e.userId) exhibitorIds.add(e.userId.toString());
+  // Get matching events
+  let events = await Event.find(eventQuery);
+  
+  // Apply category filter if provided
+  if (categoryId) {
+    const category = await Category.findById(categoryId);
+    if (category) {
+      const categoryValue = category.value;
+      events = events.filter(event => {
+        if (!event.schedules || !Array.isArray(event.schedules)) return false;
+        return event.schedules.some(schedule => 
+          schedule.activities && schedule.activities.some(activity => 
+            activity.category === categoryValue
+          )
+        );
       });
-      if (event.visitor) event.visitor.forEach(v => {
-        if (v.userId) visitorIds.add(v.userId.toString());
-      });
-    });
-
-    if (exhibitorIds.size > 0) {
-      let exhibitorQuery = { _id: { $in: Array.from(exhibitorIds) }, isDeleted: false };
-      if (Object.keys(dateFilter).length > 0) exhibitorQuery.createdAt = dateFilter;
-      
-      recentExhibitors = await Exhibitor.find(exhibitorQuery)
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .select('companyName createdAt');
     }
-
-    if (visitorIds.size > 0) {
-      let visitorQuery = { _id: { $in: Array.from(visitorIds) }, isDeleted: false };
-      if (Object.keys(dateFilter).length > 0) visitorQuery.createdAt = dateFilter;
-
-      recentVisitors = await Visitor.find(visitorQuery)
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .select('name createdAt');
-    }
-  } else if (userType === 'superAdmin') {
-    // --- SUPER ADMIN SCOPE: Global View ---
-    const targetOrganizerId = filters.organizerId;
-    
-    let eventQuery = { isDeleted: false };
-    if (targetOrganizerId) eventQuery.organizerId = targetOrganizerId;
-    if (Object.keys(dateFilter).length > 0) eventQuery.updatedAt = dateFilter;
-
-    recentEvents = await Event.find(eventQuery)
-      .sort({ updatedAt: -1 })
-      .limit(10)
-      .select('title updatedAt createdAt');
-
-    let globalUserQuery = { isDeleted: false };
-    if (Object.keys(dateFilter).length > 0) globalUserQuery.createdAt = dateFilter;
-
-    recentExhibitors = await Exhibitor.find(globalUserQuery)
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .select('companyName createdAt');
-    
-    recentVisitors = await Visitor.find(globalUserQuery)
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .select('name createdAt');
   }
+
+  const eventIds = events.map(e => e._id);
+  const recentEvents = events.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 10);
+
+  // Get related IDs for user activities
+  const exhibitorIds = new Set();
+  const visitorIds = new Set();
+  events.forEach(event => {
+    event.exhibitor?.forEach(e => { if (e.userId) exhibitorIds.add(e.userId.toString()); });
+    event.visitor?.forEach(v => { if (v.userId) visitorIds.add(v.userId.toString()); });
+  });
+
+  // Fetch activities in parallel
+  const [recentExhibitors, recentVisitors, recentScans] = await Promise.all([
+    exhibitorIds.size > 0 
+      ? Exhibitor.find({ _id: { $in: Array.from(exhibitorIds) }, isDeleted: false }).sort({ createdAt: -1 }).limit(10).select('companyName createdAt')
+      : [],
+    visitorIds.size > 0 
+      ? Visitor.find({ _id: { $in: Array.from(visitorIds) }, isDeleted: false }).sort({ createdAt: -1 }).limit(10).select('name createdAt')
+      : [],
+    Scan.find({ eventId: { $in: eventIds } }).sort({ createdAt: -1 }).limit(10).populate('scanner eventId')
+  ]);
 
   // Format activities
   recentEvents.forEach(event => {
@@ -582,9 +491,20 @@ const getRecentActivity = asyncHandler(async (req, res) => {
       type: 'visitor'
     });
   });
+
+  recentScans.forEach(scan => {
+    if (scan.scanner && scan.eventId) {
+      activities.push({
+        action: `${scan.userModel} scanned an attendee at "${scan.eventId.title}"`,
+        time: getTimeAgo(scan.createdAt),
+        timestamp: scan.createdAt,
+        type: 'scan'
+      });
+    }
+  });
   
   activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  successResponse(res, activities.slice(0, 10));
+  successResponse(res, activities.slice(0, 50));
 });
 
 // Helper function to calculate time ago

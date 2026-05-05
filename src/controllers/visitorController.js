@@ -345,8 +345,20 @@ const getVisitors = asyncHandler(async (req, res) => {
     .skip(skip)
     .limit(parseInt(limit));
 
+  // For each visitor, find events they are registered for
+  const visitorsWithEvents = await Promise.all(visitors.map(async (visitor) => {
+    const registeredEvents = await Event.find({
+      'visitor.userId': visitor._id,
+      isDeleted: false
+    }).select('_id title fromDate toDate location');
+    
+    const visitorObj = visitor.toObject();
+    visitorObj.registeredEvents = registeredEvents;
+    return visitorObj;
+  }));
+
   const response = {
-    visitors,
+    visitors: visitorsWithEvents,
     pagination: {
       currentPage: parseInt(page),
       totalPages: Math.ceil(total / limit),
@@ -359,10 +371,19 @@ const getVisitors = asyncHandler(async (req, res) => {
 });
 
 const getVisitorById = asyncHandler(async (req, res) => {
-  const { id } = req.body; // Changed from params to body
+  const { id } = req.body;
   const visitor = await Visitor.findById(id);
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
-  successResponse(res, visitor);
+  
+  const registeredEvents = await Event.find({
+    'visitor.userId': visitor._id,
+    isDeleted: false
+  }).select('_id title fromDate toDate location');
+
+  const visitorObj = visitor.toObject();
+  visitorObj.registeredEvents = registeredEvents;
+
+  successResponse(res, visitorObj);
 });
 
 const updateVisitor = asyncHandler(async (req, res) => {
@@ -681,11 +702,16 @@ const getMyEvents = asyncHandler(async (req, res) => {
     const visitorData = event.visitor.find(v => v.userId.toString() === req.user.id);
     
     // Add status
+    // Add status - Fix date comparison logic
+    const eventStartDate = new Date(event.fromDate);
     const eventEndDate = new Date(event.toDate);
-    if (eventEndDate < currentDate) {
+    // Set time to end of day for proper comparison
+    eventEndDate.setHours(23, 59, 59, 999);
+    
+    if (currentDate > eventEndDate) {
       eventObj.status = 'ended';
       eventObj.statusColor = 'red';
-    } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+    } else if (currentDate >= eventStartDate && currentDate <= eventEndDate) {
       eventObj.status = 'ongoing';
       eventObj.statusColor = 'orange';
     } else {

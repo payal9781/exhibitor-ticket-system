@@ -11,6 +11,35 @@ const Attendance = require('../models/z-index').models.Attendance;
 const fcmNotification = require('../utils/fcmToken_notification').sendNotification;
 const Notification = require('../models/notification');
 const Follow = require('../models/Follow');
+
+// Utility function to update ended events to isActive: false
+const updateEndedEventsStatus = async () => {
+  try {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const result = await Event.updateMany(
+      {
+        isDeleted: false,
+        isActive: true,
+        toDate: { $lt: startOfToday }
+      },
+      {
+        $set: { isActive: false }
+      }
+    );
+    
+    if (result.modifiedCount > 0) {
+      console.log(`[updateEndedEventsStatus] Updated ${result.modifiedCount} ended events to isActive: false`);
+    }
+    
+    return result.modifiedCount;
+  } catch (error) {
+    console.error('[updateEndedEventsStatus] Error updating ended events:', error);
+    return 0;
+  }
+};
+
 // Get total connections for exhibitor/visitor across all events
 const getTotalConnections = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -310,10 +339,14 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
   const userType = req.user.type;
   const currentDate = new Date();
 
+  // Update ended events to isActive: false
+  await updateEndedEventsStatus();
+
   // Find events where user is registered and verified
+  // Note: We don't filter by isActive here because users should see all events they registered for,
+  // including ended ones. The status will be calculated dynamically.
   let query = {
     isDeleted: false,
-    isActive: true,
   };
 
   if (userType === 'exhibitor') {
@@ -342,12 +375,16 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
   const eventsWithDetails = await Promise.all(events.map(async (event) => {
     const eventObj = event.toObject();
 
-    // Add status
+    // Add status - Fix date comparison logic
+    const eventStartDate = new Date(event.fromDate);
     const eventEndDate = new Date(event.toDate);
-    if (eventEndDate < currentDate) {
+    // Set time to end of day for proper comparison
+    eventEndDate.setHours(23, 59, 59, 999);
+    
+    if (currentDate > eventEndDate) {
       eventObj.status = 'ended';
       eventObj.statusColor = 'red';
-    } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+    } else if (currentDate >= eventStartDate && currentDate <= eventEndDate) {
       eventObj.status = 'ongoing';
       eventObj.statusColor = 'orange';
     } else {
@@ -403,7 +440,20 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
   const userType = req.user.type;
   const currentDate = new Date();
 
-  // Get all scans by this user
+  // 1. Get all events where the user is registered
+  let registeredQuery = {
+    isDeleted: false,
+  };
+
+  if (userType === 'exhibitor') {
+    registeredQuery['exhibitor'] = { $elemMatch: { userId: userId, isVerified: true } };
+  } else {
+    registeredQuery['visitor'] = { $elemMatch: { userId: userId, isVerified: true } };
+  }
+
+  const registeredEvents = await Event.find(registeredQuery).select('title fromDate toDate location media');
+
+  // 2. Get all scans by this user to identify attended events
   const scans = await Scan.find({
     scanner: userId,
     userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor'
@@ -416,18 +466,34 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
     if (!uniqueEvents[eventId]) {
       const event = scan.eventId;
 
-      // Add status
+      // Add status - Fix date comparison logic
+      const eventStartDate = new Date(event.fromDate);
       const eventEndDate = new Date(event.toDate);
+      // Set time to end of day for proper comparison
+      eventEndDate.setHours(23, 59, 59, 999);
+      
+      // Debug logging
+      console.log('Event:', event.title);
+      console.log('Current Date:', currentDate);
+      console.log('Event Start Date:', eventStartDate);
+      console.log('Event End Date:', eventEndDate);
+      console.log('Current > End?', currentDate > eventEndDate);
+      console.log('Current >= Start?', currentDate >= eventStartDate);
+      console.log('Current <= End?', currentDate <= eventEndDate);
+      
       let status, statusColor;
-      if (eventEndDate < currentDate) {
+      if (currentDate > eventEndDate) {
         status = 'ended';
         statusColor = 'red';
-      } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+        console.log('Status: ended');
+      } else if (currentDate >= eventStartDate && currentDate <= eventEndDate) {
         status = 'ongoing';
         statusColor = 'orange';
+        console.log('Status: ongoing');
       } else {
         status = 'upcoming';
         statusColor = 'green';
+        console.log('Status: upcoming');
       }
 
       uniqueEvents[eventId] = {
@@ -446,8 +512,36 @@ const getAttendedEvents = asyncHandler(async (req, res) => {
 
     // Count unique scanned users
     scan.scannedUser.forEach(scannedUserId => {
-      uniqueEvents[eventId].uniqueScannedUsers.add(scannedUserId.toString());
+      if (uniqueEvents[eventId]) {
+        uniqueEvents[eventId].uniqueScannedUsers.add(scannedUserId.toString());
+      }
     });
+  });
+
+  // 3. Add registered events that are currently ongoing (even if no scans yet)
+  registeredEvents.forEach(event => {
+    const eventId = event._id.toString();
+    if (!uniqueEvents[eventId]) {
+      const eventStartDate = new Date(event.fromDate);
+      const eventEndDate = new Date(event.toDate);
+      eventEndDate.setHours(23, 59, 59, 999);
+
+      // Only add if it's currently ongoing
+      if (currentDate >= eventStartDate && currentDate <= eventEndDate) {
+        uniqueEvents[eventId] = {
+          eventId,
+          title: event.title,
+          fromDate: event.fromDate,
+          toDate: event.toDate,
+          location: event.location,
+          media: event.media,
+          status: 'ongoing',
+          statusColor: 'orange',
+          totalConnections: 0,
+          uniqueScannedUsers: new Set()
+        };
+      }
+    }
   });
 
   // Convert to array and finalize connection counts
@@ -623,6 +717,7 @@ const getScannedUserSlots = asyncHandler(async (req, res) => {
 
   const currentDate = new Date();
   const eventEndDate = new Date(event.toDate);
+  eventEndDate.setHours(23, 59, 59, 999);
   
   // If event has ended, return empty slots
   if (eventEndDate < currentDate) {
@@ -760,6 +855,7 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
 
   const currentDate = new Date();
   const eventEndDate = new Date(event.toDate);
+  eventEndDate.setHours(23, 59, 59, 999);
   if (eventEndDate < currentDate) {
     return errorResponse(res, 'Cannot book meetings for ended events', 400);
   }
@@ -1243,6 +1339,7 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
 
   const currentDate = new Date();
   const eventEndDate = new Date(event.toDate);
+  eventEndDate.setHours(23, 59, 59, 999);
   
   // If event has ended, return empty slots
   if (eventEndDate < currentDate) {

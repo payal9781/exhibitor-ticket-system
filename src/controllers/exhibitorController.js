@@ -214,8 +214,7 @@ const getExhibitors = asyncHandler(async (req, res) => {
   const userRole = req.user.type;
   const currentUserId = req.user.id;
 
-  let exhibitors;
-  let total;
+  let query = { isDeleted: false };
 
   // Filter by eventId if provided
   if (eventId && eventId !== 'all') {
@@ -263,54 +262,9 @@ const getExhibitors = asyncHandler(async (req, res) => {
         }
       });
     }
-
-    let query = {
-      _id: { $in: exhibitorIds },
-      isDeleted: false
-    };
-
-    // Filter by status
-    if (status && status !== 'all') {
-      query.isActive = status === 'active';
-    }
-
-    // Add search functionality
-    if (search && search.trim()) {
-      query.$or = [
-        { companyName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { Sector: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { bio: { $regex: search, $options: 'i' } },
-        { website: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Calculate pagination
-    const skip = (page - 1) * limit;
-    total = await Exhibitor.countDocuments(query);
-
-    exhibitors = await Exhibitor.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const response = {
-      exhibitors,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        itemsPerPage: parseInt(limit)
-      }
-    };
-
-    return res.status(200).json(response);
-  }
-
-  // If organizer is requesting, filter by their events only
-  if (userRole === 'organizer' || organizerId) {
+    query._id = { $in: exhibitorIds };
+  } else if (userRole === 'organizer' || organizerId) {
+    // If organizer is requesting, filter by their events only
     const targetOrganizerId = organizerId || currentUserId;
 
     // Get all events organized by this organizer
@@ -319,7 +273,7 @@ const getExhibitors = asyncHandler(async (req, res) => {
       isDeleted: false
     }).select('_id exhibitor');
 
-    const eventIds = organizerEvents.map(event => new mongoose.Types.ObjectId(event._id));
+    const eventIds = organizerEvents.map(event => event._id);
 
     // Find exhibitors who have attended these events and are verified
     const attendedExhibitors = await Event.aggregate([
@@ -342,98 +296,50 @@ const getExhibitors = asyncHandler(async (req, res) => {
         }
       });
     }
-
-    let query = {
-      _id: { $in: exhibitorIds },
-      isDeleted: false
-    };
-
-    // Filter by status - only filter if status is explicitly provided and not 'all'
-    if (status && status !== 'all') {
-      query.isActive = status === 'active';
-    }
-    // If status is 'all' or not provided, show both active and inactive (don't filter by isActive)
-
-    // Add search functionality
-    if (search && search.trim()) {
-      query.$or = [
-        { companyName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { Sector: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { bio: { $regex: search, $options: 'i' } },
-        { website: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Calculate pagination
-    const skip = (page - 1) * limit;
-    total = await Exhibitor.countDocuments(query);
-
-    exhibitors = await Exhibitor.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-  } else {
-    // SuperAdmin can see all verified exhibitors
-    let query = { isDeleted: false };
-
-    // Filter by status - only filter if status is explicitly provided and not 'all'
-    if (status && status !== 'all') {
-      query.isActive = status === 'active';
-    }
-    // If status is 'all' or not provided, show both active and inactive (don't filter by isActive)
-
-    // Add search functionality
-    if (search && search.trim()) {
-      query.$or = [
-        { companyName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { Sector: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { bio: { $regex: search, $options: 'i' } },
-        { website: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Find events with verified exhibitors
-    const attendedExhibitors = await Event.aggregate([
-      { $unwind: '$exhibitor' },
-      { $match: { 'exhibitor.isVerified': true } },
-      { $group: { _id: '$exhibitor.userId' } }
-    ]);
-
-    const exhibitorIds = attendedExhibitors.map(item => item._id);
-
-    if (exhibitorIds.length > 0) {
-      query._id = { $in: exhibitorIds };
-    } else {
-      return res.status(200).json({
-        exhibitors: [],
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: 0,
-          totalItems: 0,
-          itemsPerPage: parseInt(limit)
-        }
-      });
-    }
-
-    // Calculate pagination
-    const skip = (page - 1) * limit;
-    total = await Exhibitor.countDocuments(query);
-
-    exhibitors = await Exhibitor.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    query._id = { $in: exhibitorIds };
   }
 
+  // Filter by status
+  if (status && status !== 'all') {
+    query.isActive = status === 'active';
+  }
+
+  // Add search functionality
+  if (search && search.trim()) {
+    query.$or = [
+      { companyName: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+      { Sector: { $regex: search, $options: 'i' } },
+      { location: { $regex: search, $options: 'i' } },
+      { bio: { $regex: search, $options: 'i' } },
+      { website: { $regex: search, $options: 'i' } }
+    ];
+  }
+
+  // Calculate pagination
+  const skip = (page - 1) * limit;
+  const total = await Exhibitor.countDocuments(query);
+
+  const exhibitors = await Exhibitor.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit));
+
+  // For each exhibitor, find events they are registered for
+  const exhibitorsWithEvents = await Promise.all(exhibitors.map(async (exhibitor) => {
+    const registeredEvents = await Event.find({
+      'exhibitor.userId': exhibitor._id,
+      isDeleted: false
+    }).select('_id title fromDate toDate location');
+    
+    const exhibitorObj = exhibitor.toObject();
+    exhibitorObj.registeredEvents = registeredEvents;
+    return exhibitorObj;
+  }));
+
   const response = {
-    exhibitors,
+    exhibitors: exhibitorsWithEvents,
     pagination: {
       currentPage: parseInt(page),
       totalPages: Math.ceil(total / limit),
@@ -442,14 +348,23 @@ const getExhibitors = asyncHandler(async (req, res) => {
     }
   };
 
-  res.status(200).json(response);
+  return res.status(200).json(response);
 });
 
 const getExhibitorById = asyncHandler(async (req, res) => {
-  const { id } = req.body; // Changed from params to body
+  const { id } = req.body;
   const exhibitor = await Exhibitor.findById(id);
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
-  successResponse(res, exhibitor);
+  
+  const registeredEvents = await Event.find({
+    'exhibitor.userId': exhibitor._id,
+    isDeleted: false
+  }).select('_id title fromDate toDate location');
+
+  const exhibitorObj = exhibitor.toObject();
+  exhibitorObj.registeredEvents = registeredEvents;
+
+  successResponse(res, exhibitorObj);
 });
 const updateExhibitor = asyncHandler(async (req, res) => {
   const { id, eventId, ...updateData } = req.body; // Extract eventId separately
@@ -825,11 +740,16 @@ const getMyEvents = asyncHandler(async (req, res) => {
     const exhibitorData = event.exhibitor.find(ex => ex.userId.toString() === req.user.id);
 
     // Add status
+    // Add status - Fix date comparison logic
+    const eventStartDate = new Date(event.fromDate);
     const eventEndDate = new Date(event.toDate);
-    if (eventEndDate < currentDate) {
+    // Set time to end of day for proper comparison
+    eventEndDate.setHours(23, 59, 59, 999);
+    
+    if (currentDate > eventEndDate) {
       eventObj.status = 'ended';
       eventObj.statusColor = 'red';
-    } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+    } else if (currentDate >= eventStartDate && currentDate <= eventEndDate) {
       eventObj.status = 'ongoing';
       eventObj.statusColor = 'orange';
     } else {

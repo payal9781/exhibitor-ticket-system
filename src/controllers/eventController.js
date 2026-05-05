@@ -252,13 +252,18 @@ const getEvents = asyncHandler(async (req, res) => {
 
   const eventsWithStatus = events.map(event => {
     const eventObj = event.toObject();
-    const eventEndDate = new Date(event.toDate);
     const currentDate = new Date();
 
-    if (eventEndDate < currentDate) {
+    // Add status - Fix date comparison logic
+    const eventStartDate = new Date(event.fromDate);
+    const eventEndDate = new Date(event.toDate);
+    // Set time to end of day for proper comparison
+    eventEndDate.setHours(23, 59, 59, 999);
+    
+    if (currentDate > eventEndDate) {
       eventObj.status = 'ended';
       eventObj.statusColor = 'red';
-    } else if (new Date(event.fromDate) <= currentDate && eventEndDate >= currentDate) {
+    } else if (currentDate >= eventStartDate && currentDate <= eventEndDate) {
       eventObj.status = 'ongoing';
       eventObj.statusColor = 'orange';
     } else {
