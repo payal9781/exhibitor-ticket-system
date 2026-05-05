@@ -950,8 +950,13 @@ const sendMeetingRequest = asyncHandler(async (req, res) => {
       .select('name email phone profileImage companyName fcmToken');
   }
 
-  const result = await fcmNotification(requestedDetails.fcmToken,['meeting request',`${requestedDetails?.companyName} has sent you a meeting request`,{}]);
-  console.log(result);
+  const requesterName = requesterDetails?.companyName || requesterDetails?.name || 'Someone';
+  const result = await fcmNotification(requestedDetails.fcmToken, [
+    notification.title,
+    notification.message,
+    { meetingId: meeting._id.toString() }
+  ]);
+  console.log('FCM meeting request result:', result);
   successResponse(res, {
     message: 'Meeting request sent successfully',
     meeting: {
@@ -1088,13 +1093,20 @@ const respondToMeetingRequest = asyncHandler(async (req, res) => {
 
   let requesterDetails;
   if (meeting?.requesterType === 'exhibitor') {
-    requesterDetails = await Exhibitor.findById(meeting.requestedId)
+    requesterDetails = await Exhibitor.findById(meeting.requesterId)
       .select('companyName email phone profileImage fcmToken');
   } else {
-    requesterDetails = await Visitor.findById(meeting.requestedId)
+    requesterDetails = await Visitor.findById(meeting.requesterId)
       .select('name email phone profileImage companyName fcmToken');
   }
-  await fcmNotification(requesterDetails?.fcmToken,['meeting request',`${requesterDetails?.companyName} has ${status} you a meeting request`,{}]);
+  
+  if (requesterDetails?.fcmToken) {
+    await fcmNotification(requesterDetails.fcmToken, [
+      notification.title,
+      notification.message,
+      { meetingId: meeting._id.toString(), status }
+    ]);
+  }
   successResponse(res, {
     message: `Meeting request ${status} successfully`,
     meeting: {
