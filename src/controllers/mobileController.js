@@ -595,6 +595,42 @@ const recordScan = asyncHandler(async (req, res) => {
   }
 
   try {
+    // Auto-register scanner to event if not already registered
+    const scannerArrayName = scannerType === 'exhibitor' ? 'exhibitor' : 'visitor';
+    const scannerAlreadyRegistered = event[scannerArrayName].some(
+      user => user.userId.toString() === scannerId.toString()
+    );
+
+    if (!scannerAlreadyRegistered) {
+      console.log(`[recordScan] Auto-registering ${scannerType} ${scannerId} to event ${eventId}`);
+      
+      // Generate QR code for scanner
+      const { generateQRCode } = require('../services/qrCodeService');
+      const qrData = {
+        userId: scannerId,
+        userType: scannerType,
+        eventId: eventId
+      };
+      const qrCode = await generateQRCode(JSON.stringify(qrData));
+
+      // Add scanner to event
+      event[scannerArrayName].push({
+        userId: scannerId,
+        qrCode: qrCode,
+        registeredAt: new Date(),
+        isVerified: true,
+        addedBy: {
+          userId: scannerId,
+          userType: scannerType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+          name: req.user.name || 'Self',
+          addedAt: new Date()
+        }
+      });
+
+      await event.save();
+      console.log(`[recordScan] Successfully registered ${scannerType} ${scannerId} to event ${eventId}`);
+    }
+
     // Record for scanner (scannerId scanning scannedUserId)
     let scannerRecord = await Scan.findOne({
       scanner: scannerId,
@@ -656,6 +692,7 @@ const recordScan = asyncHandler(async (req, res) => {
     }, 201);
 
   } catch (error) {
+    console.error('[recordScan] Error:', error);
     return successResponse(res, { message: 'Failed to record scan', data: 0 }, 500);
   }
 });
