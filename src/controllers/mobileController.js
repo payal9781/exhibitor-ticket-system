@@ -186,7 +186,7 @@ const getEventAnalytics = asyncHandler(async (req, res) => {
           status: 'accepted',
           $or: [
             { requesterId: ex.userId, requesterType: 'exhibitor' },
-            { recipientId: ex.userId, requestedType: 'exhibitor' },
+            { requestedId: ex.userId, requestedType: 'exhibitor' },
           ],
         });
 
@@ -285,13 +285,13 @@ const getEventConnections = asyncHandler(async (req, res) => {
   });
 
   // Get total accepted meetings count for this specific event
-  const totalAcceptedMeetings = await Meeting.countDocuments({
-    eventId: eventId,
-    $or: [
-      { requesterId: userId, status: 'accepted' },
-      { recipientId: userId, status: 'accepted' }
-    ]
-  });
+    const totalAcceptedMeetings = await Meeting.countDocuments({
+      eventId: eventId,
+      $or: [
+        { requesterId: userId, status: 'accepted' },
+        { requestedId: userId, status: 'accepted' }
+      ]
+    });
 
   // Get user's QR code for this event
   const fullEvent = await Event.findById(eventId);
@@ -299,15 +299,11 @@ const getEventConnections = asyncHandler(async (req, res) => {
   let registeredAt = null;
 
   if (fullEvent) {
-    const userRegistration = userType === 'exhibitor'
-      ? fullEvent.exhibitor.find(e => {
-          const exhibitorId = e.userId._id ? e.userId._id.toString() : e.userId.toString();
-          return exhibitorId === userId.toString();
-        })
-      : fullEvent.visitor.find(v => {
-          const visitorId = v.userId._id ? v.userId._id.toString() : v.userId.toString();
-          return visitorId === userId.toString();
-        });
+    const registrationArray = userType === 'exhibitor' ? fullEvent.exhibitor : fullEvent.visitor;
+    const userRegistration = registrationArray.find(r => {
+      const rUserId = r.userId?._id ? r.userId._id.toString() : r.userId?.toString();
+      return rUserId === userId.toString();
+    });
 
     myQRCode = userRegistration?.qrCode;
     registeredAt = userRegistration?.registeredAt;
@@ -367,8 +363,8 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
 
   const events = await Event.find(query)
     .populate('organizerId', 'name email organizationName')
-    .populate('exhibitor.userId', 'companyName email phone profileImage bio Sector location')
-    .populate('visitor.userId', 'name email phone profileImage bio Sector location companyName')
+    .populate('exhibitor.userId', '_id companyName email phone profileImage bio Sector location')
+    .populate('visitor.userId', '_id name email phone profileImage bio Sector location companyName')
     .sort({ fromDate: 1 });
 
   // Add status and connection count for each event
@@ -409,15 +405,11 @@ const getMyRegisteredEvents = asyncHandler(async (req, res) => {
     eventObj.totalConnections = uniqueScannedUsers.size;
 
     // Add user's QR code for this event
-    const userRegistration = userType === 'exhibitor'
-      ? event.exhibitor.find(e => {
-          const exhibitorId = e.userId._id ? e.userId._id.toString() : e.userId.toString();
-          return exhibitorId === userId.toString();
-        })
-      : event.visitor.find(v => {
-          const visitorId = v.userId._id ? v.userId._id.toString() : v.userId.toString();
-          return visitorId === userId.toString();
-        });
+    const registrationArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
+    const userRegistration = registrationArray.find(r => {
+      const rUserId = r.userId?._id ? r.userId._id.toString() : r.userId?.toString();
+      return rUserId === userId.toString();
+    });
 
     eventObj.myQRCode = userRegistration?.qrCode;
     eventObj.registeredAt = userRegistration?.registeredAt;

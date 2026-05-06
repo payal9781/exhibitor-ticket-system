@@ -17,7 +17,7 @@ const uploadDir = path.join(__dirname, '..', 'uploads', 'banners');
 fs.mkdir(uploadDir, { recursive: true }).catch(err => console.error('Failed to create upload directory:', err));
 
 const createEvent = asyncHandler(async (req, res) => {
-  const { schedules, media, ...eventData } = req.body;
+  const { schedules, media, exhibitor, visitor, ...eventData } = req.body;
 
   // Parse schedules if provided
   let parsedSchedules = [];
@@ -246,7 +246,7 @@ const getEvents = asyncHandler(async (req, res) => {
 
   const events = await Event.find(query)
     .populate('organizerId', 'name email organizationName')
-    .sort({ fromDate: -1 })
+    .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit));
 
@@ -302,7 +302,7 @@ const getEventById = asyncHandler(async (req, res) => {
 });
 
 const updateEvent = asyncHandler(async (req, res) => {
-  const { id, schedules, fromDate, toDate, media, ...updateData } = req.body;
+  const { id, schedules, fromDate, toDate, media, exhibitor, visitor, ...updateData } = req.body;
 
   // Handle FormData case where id might be in the body or as a separate field
   const eventId = id || req.body.id;
