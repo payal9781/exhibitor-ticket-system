@@ -1339,6 +1339,8 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const userType = req.user.type;
 
+  console.log(`[getMySlotStatus] Request - userId: ${userId}, userType: ${userType}, eventId: ${eventId}`);
+
   if (!eventId) {
     return errorResponse(res, 'Event ID is required', 400);
   }
@@ -1349,12 +1351,18 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
+  console.log(`[getMySlotStatus] Event found - fromDate: ${event.fromDate}, toDate: ${event.toDate}`);
+  console.log(`[getMySlotStatus] Meeting times - start: ${event.meetingStartTime}, end: ${event.meetingEndTime}, interval: ${event.timeInterval}`);
+
   const currentDate = new Date();
   const eventEndDate = new Date(event.toDate);
   eventEndDate.setHours(23, 59, 59, 999);
   
+  console.log(`[getMySlotStatus] Current date: ${currentDate}, Event end date: ${eventEndDate}`);
+  
   // If event has ended, return empty slots
   if (eventEndDate < currentDate) {
+    console.log(`[getMySlotStatus] Event has ended, returning empty slots`);
     return successResponse(res, {
       eventId,
       showSlots: false,
@@ -1364,14 +1372,46 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
     });
   }
 
-  const userSlot = await UserEventSlot.findOne({
+  let userSlot = await UserEventSlot.findOne({
     userId,
     userType,
     eventId
   });
 
+  console.log(`[getMySlotStatus] UserEventSlot found: ${!!userSlot}, slots count: ${userSlot?.slots?.length || 0}`);
+
+  // If no slots exist, create them automatically
   if (!userSlot) {
-    return errorResponse(res, 'User slots not found for this event', 404);
+    console.log(`[getMySlotStatus] No slots found, creating new slots`);
+    const generateSlots = require('../utils/slotGenerator');
+    
+    // Generate slots for the event duration with meeting times
+    const rawSlots = generateSlots(
+      event.fromDate, 
+      event.toDate, 
+      event.meetingStartTime, 
+      event.meetingEndTime, 
+      event.timeInterval
+    );
+    const slots = rawSlots.map(s => ({ ...s, status: 'available' }));
+    
+    console.log(`[getMySlotStatus] Generated ${slots.length} slots`);
+    
+    if (slots.length === 0) {
+      console.log(`[getMySlotStatus] WARNING: No slots generated! Check if meetingEndTime (${event.meetingEndTime}) is after meetingStartTime (${event.meetingStartTime})`);
+      return errorResponse(res, `Cannot generate slots: meetingEndTime (${event.meetingEndTime}) must be after meetingStartTime (${event.meetingStartTime})`, 400);
+    }
+    
+    userSlot = new UserEventSlot({
+      userId,
+      userType,
+      eventId,
+      slots,
+      showSlots: false // Default to hidden
+    });
+    
+    await userSlot.save();
+    console.log(`[getMySlotStatus] Created and saved slots for user ${userId} in event ${eventId}`);
   }
 
   // Filter out past slots - only show future slots
@@ -1379,6 +1419,8 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
     const slotStartDate = new Date(slot.start);
     return slotStartDate >= currentDate;
   });
+
+  console.log(`[getMySlotStatus] Total slots: ${userSlot.slots.length}, Future slots: ${futureSlots.length}`);
 
   // Group slots by date and status with color coding
   const slotsByDate = {};
@@ -1418,6 +1460,9 @@ const getMySlotStatus = asyncHandler(async (req, res) => {
 
     statusCounts[slot.status]++;
   });
+
+  console.log(`[getMySlotStatus] Status counts:`, statusCounts);
+  console.log(`[getMySlotStatus] Slots by date keys:`, Object.keys(slotsByDate));
 
   successResponse(res, {
     eventId,

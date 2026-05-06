@@ -34,12 +34,24 @@ const eventSchema = new mongoose.Schema({
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now },
     isVerified: { type: Boolean, default: true },
+    addedBy: { 
+      userId: { type: mongoose.Schema.Types.ObjectId, refPath: 'exhibitor.addedBy.userType' },
+      userType: { type: String, enum: ['Organizer', 'Superadmin', 'Exhibitor', 'Visitor'] },
+      name: { type: String },
+      addedAt: { type: Date, default: Date.now }
+    }
   }],
   visitor: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Visitor" },
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now },
     isVerified: { type: Boolean, default: true },
+    addedBy: { 
+      userId: { type: mongoose.Schema.Types.ObjectId, refPath: 'visitor.addedBy.userType' },
+      userType: { type: String, enum: ['Organizer', 'Superadmin', 'Exhibitor', 'Visitor'] },
+      name: { type: String },
+      addedAt: { type: Date, default: Date.now }
+    }
   }],
   sponsors: [{
     name: { type: String, required: true },

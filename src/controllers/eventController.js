@@ -845,16 +845,48 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
 
   let isNewRegistration = false;
 
+  // Fetch admin's name from database
+  let adminName = 'Admin';
+  try {
+    if (req.user.type === 'organizer') {
+      const Organizer = require('../models/Organizer');
+      const organizer = await Organizer.findById(req.user.id).select('name organizationName');
+      adminName = organizer?.name || organizer?.organizationName || 'Organizer';
+    } else if (req.user.type === 'superAdmin') {
+      const Superadmin = require('../models/Superadmin');
+      const superadmin = await Superadmin.findById(req.user.id).select('name');
+      adminName = superadmin?.name || 'Superadmin';
+    }
+  } catch (error) {
+    console.error('Error fetching admin name:', error);
+  }
+
+  // Prepare addedBy information
+  const addedByInfo = {
+    userId: req.user.id,
+    userType: req.user.type === 'organizer' ? 'Organizer' : 'Superadmin',
+    name: adminName,
+    addedAt: new Date()
+  };
+
   if (participantType === 'exhibitor') {
     const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === participant._id.toString());
     if (!existingExhibitor) {
-      event.exhibitor.push({ userId: participant._id, qrCode });
+      event.exhibitor.push({ 
+        userId: participant._id, 
+        qrCode,
+        addedBy: addedByInfo
+      });
       isNewRegistration = true;
     }
   } else {
     const existingVisitor = event.visitor.find(vis => vis.userId.toString() === participant._id.toString());
     if (!existingVisitor) {
-      event.visitor.push({ userId: participant._id, qrCode });
+      event.visitor.push({ 
+        userId: participant._id, 
+        qrCode,
+        addedBy: addedByInfo
+      });
       isNewRegistration = true;
     }
   }
@@ -1210,10 +1242,32 @@ const addParticipantToEventComprehensive = asyncHandler(async (req, res) => {
   const qrResult = await generateParticipantQR(eventId, userId, userType, event.title);
   const qrCode = qrResult.qrCode;
 
+  // Fetch admin's name from database
+  let adminName = 'Admin';
+  try {
+    if (req.user.type === 'organizer') {
+      const Organizer = require('../models/Organizer');
+      const organizer = await Organizer.findById(req.user.id).select('name organizationName');
+      adminName = organizer?.name || organizer?.organizationName || 'Organizer';
+    } else if (req.user.type === 'superAdmin') {
+      const Superadmin = require('../models/Superadmin');
+      const superadmin = await Superadmin.findById(req.user.id).select('name');
+      adminName = superadmin?.name || 'Superadmin';
+    }
+  } catch (error) {
+    console.error('Error fetching admin name:', error);
+  }
+
   const participantData = {
     userId,
     qrCode,
-    registeredAt: new Date()
+    registeredAt: new Date(),
+    addedBy: {
+      userId: req.user.id,
+      userType: req.user.type === 'organizer' ? 'Organizer' : 'Superadmin',
+      name: adminName,
+      addedAt: new Date()
+    }
   };
 
   if (userType === 'exhibitor') {
@@ -1299,6 +1353,22 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
     totalProcessed: participants.length
   };
 
+  // Fetch admin's name from database once
+  let adminName = 'Admin';
+  try {
+    if (req.user.type === 'organizer') {
+      const Organizer = require('../models/Organizer');
+      const organizer = await Organizer.findById(req.user.id).select('name organizationName');
+      adminName = organizer?.name || organizer?.organizationName || 'Organizer';
+    } else if (req.user.type === 'superAdmin') {
+      const Superadmin = require('../models/Superadmin');
+      const superadmin = await Superadmin.findById(req.user.id).select('name');
+      adminName = superadmin?.name || 'Superadmin';
+    }
+  } catch (error) {
+    console.error('Error fetching admin name:', error);
+  }
+
   for (const participant of participants) {
     try {
       const { userId, userType } = participant;
@@ -1342,7 +1412,13 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
       const participantData = {
         userId,
         qrCode,
-        registeredAt: new Date()
+        registeredAt: new Date(),
+        addedBy: {
+          userId: req.user.id,
+          userType: req.user.type === 'organizer' ? 'Organizer' : 'Superadmin',
+          name: adminName,
+          addedAt: new Date()
+        }
       };
 
       if (userType === 'exhibitor') {

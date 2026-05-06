@@ -159,7 +159,13 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     userId: exhibitor._id,
     qrCode,
     registeredAt: new Date(),
-    isVerified
+    isVerified,
+    addedBy: {
+      userId: exhibitor._id,
+      userType: 'Exhibitor',
+      name: exhibitor.companyName || 'Self',
+      addedAt: new Date()
+    }
   });
 
   try {
@@ -346,7 +352,13 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     userId: visitor._id,
     qrCode,
     registeredAt: new Date(),
-    isVerified
+    isVerified,
+    addedBy: {
+      userId: visitor._id,
+      userType: 'Visitor',
+      name: visitor.name || 'Self',
+      addedAt: new Date()
+    }
   });
 
   try {

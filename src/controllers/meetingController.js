@@ -483,6 +483,15 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
           showSlots: userSlot?.showSlots || false,
           slotCounts,
           meetings: meetingDetails,
+          addedBy: exhibitor.addedBy ? {
+            name: exhibitor.addedBy.name || 'Unknown',
+            userType: exhibitor.addedBy.userType || 'Unknown',
+            addedAt: exhibitor.addedBy.addedAt || exhibitor.registeredAt
+          } : {
+            name: 'Self-Registered',
+            userType: 'Self',
+            addedAt: exhibitor.registeredAt
+          }
         };
       })
   );
@@ -577,6 +586,15 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
           showSlots: userSlot?.showSlots || false,
           slotCounts,
           meetings: meetingDetails,
+          addedBy: visitor.addedBy ? {
+            name: visitor.addedBy.name || 'Unknown',
+            userType: visitor.addedBy.userType || 'Unknown',
+            addedAt: visitor.addedBy.addedAt || visitor.registeredAt
+          } : {
+            name: 'Self-Registered',
+            userType: 'Self',
+            addedAt: visitor.registeredAt
+          }
         };
       })
   );
