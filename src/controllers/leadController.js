@@ -53,30 +53,50 @@ const createLead = asyncHandler(async (req, res) => {
 
     successResponse(res, { lead: populatedLead });
   });
-// Get all leads for the authenticated user
-
+// Get all leads for the authenticated user or all leads of an event for superAdmin
 const getLeads = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const userType = req.user.type;
     const { eventId } = req.body;
 
-    const query = { userId, userType };
-    if (eventId) {
-      if (!mongoose.Types.ObjectId.isValid(eventId)) {
-        return errorResponse(res, 'Invalid event ID', 400);
+    let query = {};
+    
+    // If superAdmin, they can see all leads for a specific event or all leads if no eventId
+    if (userType === 'superAdmin') {
+      if (eventId) {
+        if (!mongoose.Types.ObjectId.isValid(eventId)) {
+          return errorResponse(res, 'Invalid event ID', 400);
+        }
+        query.eventId = eventId;
       }
-      query.eventId = eventId;
+    } else {
+      // For other users (exhibitor/visitor), they only see their own leads
+      query = { userId, userType };
+      if (eventId) {
+        if (!mongoose.Types.ObjectId.isValid(eventId)) {
+          return errorResponse(res, 'Invalid event ID', 400);
+        }
+        query.eventId = eventId;
+      }
     }
 
     const leads = await Leads.find(query)
-      .populate({
-        path: 'userId',
-        select: '-otp -otpExpires',
-        model: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
-      })
       .populate('eventId', 'title location fromDate toDate');
 
-    successResponse(res, { leads });
+    // Manually populate userId based on userType for each lead
+    const leadsWithUserDetails = await Promise.all(leads.map(async (lead) => {
+      const modelName = lead.userType === 'exhibitor' ? 'Exhibitor' : 'Visitor';
+      const populatedLead = await Leads.findById(lead._id)
+        .populate({
+          path: 'userId',
+          select: '-otp -otpExpires',
+          model: modelName,
+        })
+        .populate('eventId', 'title location fromDate toDate');
+      return populatedLead;
+    }));
+
+    successResponse(res, { leads: leadsWithUserDetails });
   });
 
 

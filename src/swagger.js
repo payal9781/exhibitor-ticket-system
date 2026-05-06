@@ -1471,8 +1471,8 @@ const swaggerDoc = {
                 type: 'object',
                 properties: {
                   eventId: { type: 'string' },
-                  requesteeId: { type: 'string' },
-                  requesteeType: { type: 'string', enum: ['visitor', 'exhibitor'] },
+                  requestedId: { type: 'string' },
+                  requestedType: { type: 'string', enum: ['visitor', 'exhibitor'] },
                   slotStart: { type: 'string', format: 'date-time' },
                   slotEnd: { type: 'string', format: 'date-time' },
                 },

@@ -1569,32 +1569,53 @@ const scanQRForAttendance = asyncHandler(async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const existingAttendance = await Attendance.findOne({
+    let attendance = await Attendance.findOne({
       userId,
       eventId,
       attendanceDate: today
     });
 
-    if (existingAttendance) {
-      return successResponse(res, {
-        message: 'Attendance already recorded for today',
-        attendance: existingAttendance,
-        user: {
-          name: user.name || user.companyName,
-          type: userType
-        }
+    if (attendance) {
+      // Check if already checked in
+      const latestEntry = attendance.attendanceDetails?.[attendance.attendanceDetails.length - 1];
+      if (latestEntry && !latestEntry.exitTime) {
+        return successResponse(res, {
+          message: 'User is already checked in for today',
+          attendance,
+          user: {
+            name: user.name || user.companyName,
+            type: userType
+          }
+        });
+      }
+
+      // If record exists but is checked out, add new check-in entry
+      if (!attendance.attendanceDetails) attendance.attendanceDetails = [];
+      attendance.attendanceDetails.push({
+        date: new Date(),
+        entryTime: new Date()
+      });
+      attendance.currentStatus = 'checked-in';
+      attendance.scannedBy = scannerId;
+      attendance.scannedByModel = 'User';
+      attendance.qrData = parsedQRData;
+    } else {
+      // Create new attendance record
+      attendance = new Attendance({
+        userId,
+        userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+        eventId,
+        attendanceDate: today,
+        scannedBy: scannerId,
+        scannedByModel: 'User',
+        currentStatus: 'checked-in',
+        attendanceDetails: [{
+          date: new Date(),
+          entryTime: new Date()
+        }],
+        qrData: parsedQRData
       });
     }
-
-    const attendance = new Attendance({
-      userId,
-      userModel: userType === 'exhibitor' ? 'Exhibitor' : 'Visitor',
-      eventId,
-      attendanceDate: today,
-      scannedBy: scannerId,
-      scannedByModel: 'User',
-      qrData: parsedQRData
-    });
 
     await attendance.save();
     successResponse(res, {
@@ -1637,11 +1658,12 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
       attendanceDate: {
         $gte: today,
         $lt: tomorrow
-      }
+      },
+      currentStatus: 'checked-in'
     })
       .populate('userId', 'name companyName phone')
       .populate('eventId', 'title location')
-      .sort({ scanTime: -1 });
+      .sort({ updatedAt: -1 });
 
     const stats = {
       totalScansToday: todayAttendance.length,
