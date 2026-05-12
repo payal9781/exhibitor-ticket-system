@@ -32,35 +32,9 @@ const createVisitor = asyncHandler(async (req, res) => {
     }
   }
 
-  // Check for duplicate email if phone not found
-  if (!existingVisitor && visitorData.email) {
-    existingVisitor = await Visitor.findOne({
-      email: visitorData.email,
-      isDeleted: false
-    });
-    if (existingVisitor) {
-      duplicateField = 'email';
-    }
-  }
-
-  // Return error if visitor already exists (DO NOT UPDATE)
+  // Return error if visitor already exists (check only phone number)
   if (existingVisitor) {
-    const fieldMessage = duplicateField === 'mobile number' 
-      ? `A visitor with this mobile number (${visitorData.phone}) already exists. Please use the edit option to update the visitor.`
-      : `A visitor with this email (${visitorData.email}) already exists. Please use the edit option to update the visitor.`;
-    
-    return errorResponse(res, fieldMessage, 409);
-  }
-
-  // Check for deleted visitor with same email
-  if (visitorData.email) {
-    const deletedVisitor = await Visitor.findOne({
-      email: visitorData.email,
-      isDeleted: true
-    });
-    if (deletedVisitor) {
-      return errorResponse(res, 'Contact administrator', 409);
-    }
+    return errorResponse(res, `A visitor with this mobile number (${visitorData.phone}) already exists. Please use the edit option to update the visitor.`, 409);
   }
 
   // Create new visitor (only if no duplicate found)
