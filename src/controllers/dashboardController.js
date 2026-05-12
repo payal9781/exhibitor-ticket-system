@@ -394,18 +394,26 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
 
 // Get recent activity for dashboard
 const getRecentActivity = asyncHandler(async (req, res) => {
-  let filters = {};
-  if (req.method === 'POST') {
-    filters = req.body?.filters || req.body || {};
-  } else {
-    filters = req.query || {};
-  }
+  // Merge all possible sources of parameters
+  const allParams = { ...req.query, ...req.body, ...(req.body?.filters || {}) };
   
-  const { startDate, endDate, categoryId, organizerId } = filters;
+  const rawPage = allParams.page;
+  const rawLimit = allParams.limit;
+  const type = allParams.type || 'all';
+  const startDate = allParams.startDate;
+  const endDate = allParams.endDate;
+  const categoryId = allParams.categoryId;
+  const organizerId = allParams.organizerId;
+
   const userType = req.user?.type;
   const userId = req.user?.id;
+  
+  const page = parseInt(rawPage) || 1;
+  const limit = parseInt(rawLimit) || 10;
+  const skip = (page - 1) * limit;
+  const pageSize = limit;
 
-  const activities = [];
+  let activities = [];
   
   // Build base filters
   let eventQuery = { isDeleted: false };
@@ -420,91 +428,142 @@ const getRecentActivity = asyncHandler(async (req, res) => {
       end.setHours(23, 59, 59, 999);
       dateFilter.$lte = end;
     }
+  }
+
+  if (Object.keys(dateFilter).length > 0) {
     eventQuery.updatedAt = dateFilter;
   }
 
-  // Get matching events
-  let events = await Event.find(eventQuery);
-  
-  // Apply category filter if provided
-  if (categoryId) {
-    const category = await Category.findById(categoryId);
-    if (category) {
-      const categoryValue = category.value;
-      events = events.filter(event => {
-        if (!event.schedules || !Array.isArray(event.schedules)) return false;
-        return event.schedules.some(schedule => 
-          schedule.activities && schedule.activities.some(activity => 
-            activity.category === categoryValue
-          )
-        );
-      });
+  // Helper to fetch events
+  const fetchEvents = async () => {
+    let events = await Event.find(eventQuery);
+    if (categoryId) {
+      const category = await Category.findById(categoryId);
+      if (category) {
+        const categoryValue = category.value;
+        events = events.filter(event => {
+          if (!event.schedules || !Array.isArray(event.schedules)) return false;
+          return event.schedules.some(schedule => 
+            schedule.activities && schedule.activities.some(activity => 
+              activity.category === categoryValue
+            )
+          );
+        });
+      }
     }
-  }
-
-  const eventIds = events.map(e => e._id);
-  const recentEvents = events.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 10);
-
-  // Get related IDs for user activities
-  const exhibitorIds = new Set();
-  const visitorIds = new Set();
-  events.forEach(event => {
-    event.exhibitor?.forEach(e => { if (e.userId) exhibitorIds.add(e.userId.toString()); });
-    event.visitor?.forEach(v => { if (v.userId) visitorIds.add(v.userId.toString()); });
-  });
-
-  // Fetch activities in parallel
-  const [recentExhibitors, recentVisitors, recentScans] = await Promise.all([
-    exhibitorIds.size > 0 
-      ? Exhibitor.find({ _id: { $in: Array.from(exhibitorIds) }, isDeleted: false }).sort({ createdAt: -1 }).limit(10).select('companyName createdAt')
-      : [],
-    visitorIds.size > 0 
-      ? Visitor.find({ _id: { $in: Array.from(visitorIds) }, isDeleted: false }).sort({ createdAt: -1 }).limit(10).select('name createdAt')
-      : [],
-    Scan.find({ eventId: { $in: eventIds } }).sort({ createdAt: -1 }).limit(10).populate('scanner eventId')
-  ]);
-
-  // Format activities
-  recentEvents.forEach(event => {
-    activities.push({
+    return events.map(event => ({
       action: `Event "${event.title}" was ${event.createdAt.getTime() === event.updatedAt.getTime() ? 'created' : 'updated'}`,
       time: getTimeAgo(event.updatedAt),
       timestamp: event.updatedAt,
       type: 'event'
-    });
-  });
-  
-  recentExhibitors.forEach(exhibitor => {
-    activities.push({
-      action: `New exhibitor "${exhibitor.companyName}" registered`,
-      time: getTimeAgo(exhibitor.createdAt),
-      timestamp: exhibitor.createdAt,
-      type: 'exhibitor'
-    });
-  });
-  
-  recentVisitors.forEach(visitor => {
-    activities.push({
-      action: `New visitor "${visitor.name}" registered`,
-      time: getTimeAgo(visitor.createdAt),
-      timestamp: visitor.createdAt,
-      type: 'visitor'
-    });
-  });
+    }));
+  };
 
-  recentScans.forEach(scan => {
-    if (scan.scanner && scan.eventId) {
-      activities.push({
-        action: `${scan.userModel} scanned an attendee at "${scan.eventId.title}"`,
-        time: getTimeAgo(scan.createdAt),
-        timestamp: scan.createdAt,
-        type: 'scan'
+  // Helper to fetch exhibitors/visitors/scans
+  const fetchOtherActivities = async (matchingEvents) => {
+    const eventIds = matchingEvents.map(e => e._id);
+    const exhibitorIds = new Set();
+    const visitorIds = new Set();
+    matchingEvents.forEach(event => {
+      event.exhibitor?.forEach(e => { if (e.userId) exhibitorIds.add(e.userId.toString()); });
+      event.visitor?.forEach(v => { if (v.userId) visitorIds.add(v.userId.toString()); });
+    });
+
+    const otherActivities = [];
+    const queries = [];
+
+    if (type === 'all' || type === 'exhibitor') {
+      const exhibitorQuery = { _id: { $in: Array.from(exhibitorIds) }, isDeleted: false };
+      if (Object.keys(dateFilter).length > 0) exhibitorQuery.createdAt = dateFilter;
+      queries.push(Exhibitor.find(exhibitorQuery).sort({ createdAt: -1 }).select('companyName createdAt'));
+    } else {
+      queries.push(Promise.resolve([]));
+    }
+
+    if (type === 'all' || type === 'visitor') {
+      const visitorQuery = { _id: { $in: Array.from(visitorIds) }, isDeleted: false };
+      if (Object.keys(dateFilter).length > 0) visitorQuery.createdAt = dateFilter;
+      queries.push(Visitor.find(visitorQuery).sort({ createdAt: -1 }).select('name createdAt'));
+    } else {
+      queries.push(Promise.resolve([]));
+    }
+
+    if (type === 'all' || type === 'scan') {
+      const scanQuery = { eventId: { $in: eventIds } };
+      if (Object.keys(dateFilter).length > 0) scanQuery.createdAt = dateFilter;
+      queries.push(Scan.find(scanQuery).sort({ createdAt: -1 }).populate('scanner eventId'));
+    } else {
+      queries.push(Promise.resolve([]));
+    }
+
+    const [recentExhibitors, recentVisitors, recentScans] = await Promise.all(queries);
+
+    recentExhibitors.forEach(exhibitor => {
+      otherActivities.push({
+        action: `New exhibitor "${exhibitor.companyName}" registered`,
+        time: getTimeAgo(exhibitor.createdAt),
+        timestamp: exhibitor.createdAt,
+        type: 'exhibitor'
       });
+    });
+    
+    recentVisitors.forEach(visitor => {
+      otherActivities.push({
+        action: `New visitor "${visitor.name}" registered`,
+        time: getTimeAgo(visitor.createdAt),
+        timestamp: visitor.createdAt,
+        type: 'visitor'
+      });
+    });
+
+    recentScans.forEach(scan => {
+      if (scan.scanner && scan.eventId) {
+        otherActivities.push({
+          action: `${scan.userModel} scanned an attendee at "${scan.eventId.title}"`,
+          time: getTimeAgo(scan.createdAt),
+          timestamp: scan.createdAt,
+          type: 'scan'
+        });
+      }
+    });
+
+    return otherActivities;
+  };
+
+  let allActivities = [];
+  
+  // Optimization: only fetch what's needed based on type
+  if (type === 'all' || type === 'event') {
+    const eventActivities = await fetchEvents();
+    allActivities = [...allActivities, ...eventActivities];
+  }
+
+  if (type === 'all' || type === 'exhibitor' || type === 'visitor' || type === 'scan') {
+    // We still need events to get the context (exhibitor/visitor/scan)
+    const events = await Event.find(eventQuery);
+    const otherActivities = await fetchOtherActivities(events);
+    allActivities = [...allActivities, ...otherActivities];
+  }
+  
+  // Sort all combined activities by timestamp descending
+  allActivities.sort((a, b) => {
+    const timeA = new Date(a.timestamp).getTime();
+    const timeB = new Date(b.timestamp).getTime();
+    return timeB - timeA;
+  });
+  
+  const totalCount = allActivities.length;
+  const paginatedActivities = allActivities.slice(skip, skip + pageSize);
+
+  successResponse(res, {
+    activities: paginatedActivities,
+    pagination: {
+      totalCount,
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalCount / pageSize),
+      limit: pageSize
     }
   });
-  
-  activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  successResponse(res, activities.slice(0, 50));
 });
 
 // Helper function to calculate time ago

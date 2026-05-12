@@ -30,86 +30,132 @@ const sendPasswordResetEmail = async (email, resetUrl, userName) => {
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Password Reset</title>
+        <title>Reset Your Password - Planora</title>
         <style>
           body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             line-height: 1.6;
-            color: #333;
+            color: #334155;
             max-width: 600px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 0;
+            background-color: #f8fafc;
+          }
+          .container {
+            margin: 40px auto;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
           }
           .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #C73A33 0%, #E5534B 100%);
             color: white;
-            padding: 30px;
+            padding: 40px 20px;
             text-align: center;
-            border-radius: 10px 10px 0 0;
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -0.025em;
+          }
+          .header p {
+            margin: 10px 0 0;
+            font-size: 16px;
+            opacity: 0.9;
           }
           .content {
-            background: #f8f9fa;
-            padding: 30px;
-            border-radius: 0 0 10px 10px;
+            padding: 40px;
+          }
+          .greeting {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 20px;
+          }
+          .button-container {
+            text-align: center;
+            margin: 35px 0;
           }
           .button {
             display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 15px 30px;
+            background-color: #C73A33;
+            color: white !important;
+            padding: 14px 32px;
             text-decoration: none;
-            border-radius: 5px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 16px;
+            transition: background-color 0.2s;
+          }
+          .link-box {
+            background-color: #f1f5f9;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 14px;
+            word-break: break-all;
+            color: #475569;
             margin: 20px 0;
-            font-weight: bold;
+            border: 1px solid #e2e8f0;
           }
           .warning {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            color: #856404;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 20px 0;
+            background-color: #fff7ed;
+            border-left: 4px solid #f97316;
+            color: #9a3412;
+            padding: 16px;
+            border-radius: 4px;
+            margin: 25px 0;
+            font-size: 14px;
           }
           .footer {
             text-align: center;
-            margin-top: 30px;
-            color: #666;
-            font-size: 14px;
+            padding: 30px;
+            color: #94a3b8;
+            font-size: 13px;
+          }
+          .divider {
+            height: 1px;
+            background-color: #e2e8f0;
+            margin: 30px 0;
           }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1>Planora</h1>
-          <h2>Password Reset Request</h2>
-        </div>
-        
-        <div class="content">
-          <p>Hello ${userName},</p>
-          
-          <p>We received a request to reset your password for your Planora account. If you didn't make this request, you can safely ignore this email.</p>
-          
-          <p>To reset your password, click the button below:</p>
-          
-          <div style="text-align: center;">
-            <a href="${resetUrl}" class="button">Reset Password</a>
+        <div class="container">
+          <div class="header">
+            <h1>Planora</h1>
+            <p>Password Reset Request</p>
           </div>
           
-          <p>Or copy and paste this link into your browser:</p>
-          <p style="word-break: break-all; background: #e9ecef; padding: 10px; border-radius: 5px;">${resetUrl}</p>
-          
-          <div class="warning">
-            <strong>Important:</strong> This link will expire in 10 minutes for security reasons. If you need to reset your password after this time, please request a new reset link.
+          <div class="content">
+            <p class="greeting">Hello ${userName},</p>
+            
+            <p>We received a request to reset your password for your Planora account. If you didn't make this request, you can safely ignore this email.</p>
+            
+            <p>To set a new password, click the button below:</p>
+            
+            <div class="button-container">
+              <a href="${resetUrl}" class="button">Reset Password</a>
+            </div>
+            
+            <div class="warning">
+              <strong>Security Notice:</strong> This link will expire in 10 minutes for your protection. After that, you'll need to submit a new request.
+            </div>
+            
+            <p>If the button doesn't work, copy and paste this URL into your browser:</p>
+            <div class="link-box">${resetUrl}</div>
+            
+            <div class="divider"></div>
+            
+            <p>Best regards,<br><strong>The Planora Team</strong></p>
           </div>
           
-          <p>If you're having trouble with the button above, copy and paste the URL into your web browser.</p>
-          
-          <p>Best regards,<br>The Planora Team</p>
-        </div>
-        
-        <div class="footer">
-          <p>This is an automated message, please do not reply to this email.</p>
-          <p>If you need help, please contact our support team.</p>
+          <div class="footer">
+            <p>This is an automated message, please do not reply.</p>
+            <p>&copy; ${new Date().getFullYear()} Planora. All rights reserved.</p>
+          </div>
         </div>
       </body>
       </html>
