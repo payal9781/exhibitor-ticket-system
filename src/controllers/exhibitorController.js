@@ -22,6 +22,16 @@ const createExhibitor = asyncHandler(async (req, res) => {
   let existingExhibitor = null;
   let duplicateField = '';
 
+  // Validate phone number format
+  if (exhibitorData.phone) {
+    const phoneRegex = /^[0-9]{10}$/;
+    if (!phoneRegex.test(exhibitorData.phone)) {
+      return errorResponse(res, 'Phone number must be exactly 10 digits', 400);
+    }
+  } else {
+    return errorResponse(res, 'Phone number is required', 400);
+  }
+
   // Check for duplicate phone number
   if (exhibitorData.phone) {
     existingExhibitor = await Exhibitor.findOne({
@@ -370,6 +380,14 @@ const updateExhibitor = asyncHandler(async (req, res) => {
   const { id, eventId, ...updateData } = req.body; // Extract eventId separately
   const exhibitor = await Exhibitor.findById(id);
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
+
+  // Validate phone number format if provided
+  if (updateData.phone) {
+    const phoneRegex = /^[0-9]{10}$/;
+    if (!phoneRegex.test(updateData.phone)) {
+      return errorResponse(res, 'Phone number must be exactly 10 digits', 400);
+    }
+  }
 
   // Check for duplicate phone number (if phone is being updated and different from current)
   if (updateData.phone && updateData.phone !== exhibitor.phone) {

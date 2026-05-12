@@ -417,10 +417,14 @@ const changeUserRole = asyncHandler(async (req, res) => {
   return response.badRequest('Role change feature not implemented yet', res);
 });
 
-// Reset user password
+// Reset user password (admin sets the new password manually)
 const resetPassword = asyncHandler(async (req, res) => {
-  const { id } = req.body;
-  
+  const { id, newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 8) {
+    return response.badRequest('New password must be at least 8 characters long', res);
+  }
+
   let user = null;
   const models_to_check = ['Exhibitor', 'Visitor', 'Organizer'];
   for (const modelName of models_to_check) {
@@ -431,21 +435,16 @@ const resetPassword = asyncHandler(async (req, res) => {
       break;
     }
   }
-  
+
   if (!user) {
     return response.notFound('User not found', res);
   }
-  
-  // Generate a temporary password (in real implementation, send email)
-  // Ensure it's at least 8 characters long to meet validation requirements
-  // Generate a 12-character password with alphanumeric characters
-  const tempPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6).toUpperCase();
-  
-  // Set the password - the pre-save hook will hash it automatically
-  user.password = tempPassword;
+
+  // Set the admin-provided password - the pre-save hook will hash it automatically
+  user.password = newPassword;
   await user.save();
-  
-  return response.success('Password reset successfully', { tempPassword }, res);
+
+  return response.success('Password reset successfully', {}, res);
 });
 
 // Bulk update user status
