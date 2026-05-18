@@ -23,6 +23,7 @@ const {
   getAllMeetings,
   getAllUsersForEvent,
   getScans,
+  updateProfileImage
 } = require('../controllers/mobileController');
 const constants = require('../config/constants');
 
@@ -55,6 +56,7 @@ router.post('/scan-statistics', authMiddleware(['exhibitor', 'visitor']), getSca
 router.post('/my-profile', authMiddleware(['exhibitor', 'visitor']), getMyProfile);
 const upload = require('../config/multerConfig').upload;
 router.post('/update-profile', authMiddleware(['exhibitor', 'visitor']), upload(constants.PROFILE_PATH).single("profileImage"),updateMyProfile);
+router.post('/update-profile-image', authMiddleware(['exhibitor', 'visitor']), upload(constants.PROFILE_PATH).single("profileImage"), updateProfileImage);
 
 router.post('/get-schedules', authMiddleware(['exhibitor', 'visitor']), getSchedules);
 router.post('/get-all-connections-for-event', authMiddleware(['exhibitor', 'visitor']), getAllUsersForEvent);

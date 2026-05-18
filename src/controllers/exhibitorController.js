@@ -1247,6 +1247,29 @@ const getExhibitorsWithAttendance = asyncHandler(async (req, res) => {
   successResponse(res, response);
 });
 
+// Update profile image (for mobile app)
+const updateProfileImage = asyncHandler(async (req, res) => {
+  const userId = req.user.id || req.user._id;
+  
+  if (!req.file) {
+    return errorResponse(res, 'Please upload a profile image file', 400);
+  }
+
+  const exhibitor = await Exhibitor.findById(userId);
+  if (!exhibitor) {
+    return errorResponse(res, 'Exhibitor not found', 404);
+  }
+
+  exhibitor.profileImage = req.file.path;
+  await exhibitor.save();
+
+  const updatedExhibitor = await Exhibitor.findById(userId).select('-password');
+  successResponse(res, {
+    message: 'Profile image updated successfully',
+    data: updatedExhibitor
+  });
+});
+
 module.exports = {
   createExhibitor,
   getExhibitors,
@@ -1271,5 +1294,6 @@ module.exports = {
   toggleMySlotVisibility,
   getMyEventMeetings,
   getMyPendingRequests,
-  respondToMeetingRequest
+  respondToMeetingRequest,
+  updateProfileImage
 };

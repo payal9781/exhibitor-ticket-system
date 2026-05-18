@@ -2145,6 +2145,45 @@ const getFollowing = asyncHandler(async (req, res) => {
   });
 });
 
+// Update profile image (generic mobile API)
+const updateProfileImage = asyncHandler(async (req, res) => {
+  const userId = req.user.id || req.user._id;
+  const userType = req.user.type;
+
+  if (!req.file) {
+    return errorResponse(res, 'Please upload a profile image file', 400);
+  }
+
+  let user;
+  if (userType === 'exhibitor') {
+    user = await Exhibitor.findById(userId);
+  } else {
+    user = await Visitor.findById(userId);
+  }
+
+  if (!user) {
+    return errorResponse(res, 'User not found', 404);
+  }
+
+  user.profileImage = req.file.path;
+  await user.save();
+
+  let updatedUser;
+  if (userType === 'exhibitor') {
+    updatedUser = await Exhibitor.findById(userId).select('-otp -otpExpires');
+  } else {
+    updatedUser = await Visitor.findById(userId).select('-otp -otpExpires');
+  }
+
+  const userResponse = updatedUser.toObject();
+  userResponse.userType = userType;
+
+  successResponse(res, {
+    message: 'Profile image updated successfully',
+    data: userResponse
+  });
+});
+
 module.exports = {
   getTotalConnections,
   getEventAnalytics,
@@ -2173,5 +2212,6 @@ module.exports = {
   followUser,
   unfollowUser,
   getFollowers,
-  getFollowing
+  getFollowing,
+  updateProfileImage
 };

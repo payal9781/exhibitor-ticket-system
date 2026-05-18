@@ -15,6 +15,7 @@ router.use('/users', require('./userRoutes'));
 router.use('/mobile', require('./mobileRoutes'));
 router.use('/registration', require('./registrationRoutes'));
 router.use('/card', require('./cardsRoutes'));
+router.use('/chat', require('./chatRoutes'));
 // Mobile App APIs
 router.use('/exhibitor-mobile', require('./exhibitorMobileRoutes'));
 router.use('/visitor-mobile', require('./visitorMobileRoutes'));

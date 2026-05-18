@@ -1183,6 +1183,29 @@ const getVisitorsWithAttendance = asyncHandler(async (req, res) => {
   successResponse(res, response);
 });
 
+// Update profile image (for mobile app)
+const updateProfileImage = asyncHandler(async (req, res) => {
+  const userId = req.user.id || req.user._id;
+  
+  if (!req.file) {
+    return errorResponse(res, 'Please upload a profile image file', 400);
+  }
+
+  const visitor = await Visitor.findById(userId);
+  if (!visitor) {
+    return errorResponse(res, 'Visitor not found', 404);
+  }
+
+  visitor.profileImage = req.file.path;
+  await visitor.save();
+
+  const updatedVisitor = await Visitor.findById(userId).select('-password');
+  successResponse(res, {
+    message: 'Profile image updated successfully',
+    data: updatedVisitor
+  });
+});
+
 module.exports = { 
   createVisitor, 
   getVisitors, 
@@ -1207,5 +1230,6 @@ module.exports = {
   toggleMySlotVisibility,
   getMyEventMeetings,
   getMyPendingRequests,
-  respondToMeetingRequest
+  respondToMeetingRequest,
+  updateProfileImage
 };

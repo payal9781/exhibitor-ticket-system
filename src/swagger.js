@@ -1720,6 +1720,31 @@ const swaggerDoc = {
         },
       },
     },
+    '/mobile/update-profile-image': {
+      post: {
+        summary: 'Update my profile image for mobile',
+        tags: ['Mobile'],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                properties: {
+                  profileImage: { type: 'string', format: 'binary' },
+                },
+                required: ['profileImage'],
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Profile image updated successfully' },
+          400: { description: 'Please upload a profile image file' },
+          404: { description: 'User not found' },
+        },
+      },
+    },
     '/mobile/scanned-user-slots': {
       post: {
         summary: 'Get scanned user slots for mobile',
@@ -1925,6 +1950,31 @@ const swaggerDoc = {
         },
       },
     },
+    '/exhibitor-mobile/profile/update-image': {
+      post: {
+        summary: 'Update exhibitor profile image for mobile',
+        tags: ['Exhibitor Mobile'],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                properties: {
+                  profileImage: { type: 'string', format: 'binary' },
+                },
+                required: ['profileImage'],
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Exhibitor profile image updated successfully' },
+          400: { description: 'Please upload a profile image file' },
+          404: { description: 'Exhibitor not found' },
+        },
+      },
+    },
     '/exhibitor-mobile/events': {
       post: {
         summary: 'Get exhibitor events for mobile',
@@ -2109,6 +2159,31 @@ const swaggerDoc = {
         },
         responses: {
           200: { description: 'Visitor profile updated successfully' },
+        },
+      },
+    },
+    '/visitor-mobile/profile/update-image': {
+      post: {
+        summary: 'Update visitor profile image for mobile',
+        tags: ['Visitor Mobile'],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                properties: {
+                  profileImage: { type: 'string', format: 'binary' },
+                },
+                required: ['profileImage'],
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Visitor profile image updated successfully' },
+          400: { description: 'Please upload a profile image file' },
+          404: { description: 'Visitor not found' },
         },
       },
     },
@@ -2835,6 +2910,164 @@ const swaggerDoc = {
         responses: {
           200: { description: 'All users retrieved' },
           403: { description: 'Access denied' },
+        },
+      },
+    },
+    '/chat/request/send': {
+      post: {
+        summary: 'Send a chat request to another user',
+        tags: ['Chatting System'],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  eventId: { type: 'string' },
+                  receiverId: { type: 'string' },
+                  receiverType: { type: 'string', enum: ['visitor', 'exhibitor'] },
+                },
+                required: ['eventId', 'receiverId', 'receiverType']
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Chat request sent successfully' },
+          400: { description: 'Bad request or request already exists' },
+          404: { description: 'Event or recipient not found' },
+        },
+      },
+    },
+    '/chat/request/respond': {
+      post: {
+        summary: 'Accept or reject an incoming chat request',
+        tags: ['Chatting System'],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  requestId: { type: 'string' },
+                  status: { type: 'string', enum: ['accepted', 'rejected'] },
+                },
+                required: ['requestId', 'status']
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Chat request responded successfully' },
+          400: { description: 'Bad request' },
+          403: { description: 'Forbidden' },
+          404: { description: 'Request not found' },
+        },
+      },
+    },
+    '/chat/requests': {
+      get: {
+        summary: 'Get all chat requests for the current user',
+        tags: ['Chatting System'],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            schema: { type: 'string', enum: ['pending', 'accepted', 'rejected'] }
+          },
+          {
+            name: 'eventId',
+            in: 'query',
+            schema: { type: 'string' }
+          },
+          {
+            name: 'type',
+            in: 'query',
+            schema: { type: 'string', enum: ['incoming', 'outgoing'] }
+          }
+        ],
+        responses: {
+          200: { description: 'Chat requests retrieved successfully' },
+        },
+      },
+    },
+    '/chat/messages': {
+      get: {
+        summary: 'Get conversation history messages with pagination',
+        tags: ['Chatting System'],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' }
+          },
+          {
+            name: 'otherUserId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' }
+          },
+          {
+            name: 'page',
+            in: 'query',
+            schema: { type: 'number' }
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'number' }
+          }
+        ],
+        responses: {
+          200: { description: 'Messages retrieved successfully' },
+        },
+      },
+    },
+    '/chat/event-users/{eventId}': {
+      get: {
+        summary: 'Get all exhibitors and visitors of an event',
+        tags: ['Chatting System'],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' }
+          }
+        ],
+        responses: {
+          200: { description: 'Exhibitors and visitors retrieved successfully' },
+          404: { description: 'Event not found' },
+        },
+      },
+    },
+    '/chat/messages/mark-read': {
+      post: {
+        summary: 'Mark all messages in a conversation as read',
+        tags: ['Chatting System'],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  eventId: { type: 'string' },
+                  senderId: { type: 'string' },
+                },
+                required: ['eventId', 'senderId']
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Messages marked as read successfully' },
         },
       },
     },

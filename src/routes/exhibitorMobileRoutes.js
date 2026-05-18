@@ -10,12 +10,16 @@ const {
   toggleMySlotVisibility,
   getMyEventMeetings,
   getMyPendingRequests,
-  respondToMeetingRequest
+  respondToMeetingRequest,
+  updateProfileImage
 } = require('../controllers/exhibitorController');
+const constants = require('../config/constants');
+const upload = require('../config/multerConfig').upload;
 
 // Profile management
 router.post('/profile', authMiddleware(['exhibitor']), getMyProfile);
 router.post('/profile/update', authMiddleware(['exhibitor']), updateMyProfile);
+router.post('/profile/update-image', authMiddleware(['exhibitor']), upload(constants.PROFILE_PATH).single("profileImage"), updateProfileImage);
 
 // Event management
 router.post('/events', authMiddleware(['exhibitor']), getMyEvents);
