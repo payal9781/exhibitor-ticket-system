@@ -57,7 +57,7 @@ const sendChatRequest = asyncHandler(async (req, res) => {
   }
 
   // 4. Check if request already exists (either direction)
-  const existingRequest = await ChatRequest.findOne({
+  let chatRequest = await ChatRequest.findOne({
     eventId,
     $or: [
       { senderId, receiverId },
@@ -65,24 +65,35 @@ const sendChatRequest = asyncHandler(async (req, res) => {
     ]
   });
 
-  if (existingRequest) {
-    return errorResponse(
-      res, 
-      `A chat request already exists with status: ${existingRequest.status}`, 
-      400
-    );
+  if (chatRequest) {
+    if (chatRequest.status === 'rejected') {
+      // If previously rejected, allow sending request again by resetting it to pending!
+      chatRequest.status = 'pending';
+      chatRequest.senderId = senderId;
+      chatRequest.senderType = senderType;
+      chatRequest.receiverId = receiverId;
+      chatRequest.receiverType = receiverType;
+      await chatRequest.save();
+      console.log(`🔄 Reset previously rejected chat request to pending between ${senderId} and ${receiverId}`);
+    } else {
+      return errorResponse(
+        res, 
+        `A chat request already exists with status: ${chatRequest.status}`, 
+        400
+      );
+    }
+  } else {
+    // 5. Create new ChatRequest
+    chatRequest = new ChatRequest({
+      eventId,
+      senderId,
+      senderType,
+      receiverId,
+      receiverType,
+      status: 'pending'
+    });
+    await chatRequest.save();
   }
-
-  // 5. Create new ChatRequest
-  const chatRequest = new ChatRequest({
-    eventId,
-    senderId,
-    senderType,
-    receiverId,
-    receiverType,
-    status: 'pending'
-  });
-  await chatRequest.save();
 
   // Populate request data for emission
   const populatedRequest = await ChatRequest.findById(chatRequest._id)
@@ -271,6 +282,7 @@ const getChatMessages = asyncHandler(async (req, res) => {
  * Route: GET /api/v1/chat/event-users/:eventId
  */
 const getEventUsers = asyncHandler(async (req, res) => {
+  const userId = req.user.id || req.user._id;
   const { eventId } = req.params;
 
   if (!eventId) {
@@ -291,21 +303,57 @@ const getEventUsers = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  // Extract exhibitors (strictly relative paths)
+  // Fetch all chat requests for this event involving the current user
+  const chatRequests = await ChatRequest.find({
+    eventId,
+    $or: [
+      { senderId: userId },
+      { receiverId: userId }
+    ]
+  });
+
+  // Map other party ID to request info for fast O(1) lookup
+  const requestLookup = {};
+  chatRequests.forEach(reqObj => {
+    const reqData = reqObj.toObject ? reqObj.toObject() : reqObj;
+    const otherUserId = reqData.senderId.toString() === userId.toString()
+      ? reqData.receiverId.toString()
+      : reqData.senderId.toString();
+
+    requestLookup[otherUserId] = {
+      requestId: reqData._id,
+      status: reqData.status,
+      senderId: reqData.senderId,
+      receiverId: reqData.receiverId,
+      initiatedByMe: reqData.senderId.toString() === userId.toString()
+    };
+  });
+
+  // Extract exhibitors (strictly relative paths, filtering out the current user themselves)
   const exhibitors = event.exhibitor
-    .filter(e => e.userId)
+    .filter(e => e.userId && e.userId._id.toString() !== userId.toString())
     .map(e => {
       const user = e.userId.toObject ? e.userId.toObject() : e.userId;
       user.userType = 'exhibitor';
+
+      // Inject chat request status
+      const requestInfo = requestLookup[user._id.toString()];
+      user.chatRequest = requestInfo || null;
+
       return user;
     });
 
-  // Extract visitors (strictly relative paths)
+  // Extract visitors (strictly relative paths, filtering out the current user themselves)
   const visitors = event.visitor
-    .filter(v => v.userId)
+    .filter(v => v.userId && v.userId._id.toString() !== userId.toString())
     .map(v => {
       const user = v.userId.toObject ? v.userId.toObject() : v.userId;
       user.userType = 'visitor';
+
+      // Inject chat request status
+      const requestInfo = requestLookup[user._id.toString()];
+      user.chatRequest = requestInfo || null;
+
       return user;
     });
 
