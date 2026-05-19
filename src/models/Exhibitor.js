@@ -38,4 +38,8 @@ exhibitorSchema.methods.generateAccessToken = function () {
     }
   );
 };
-module.exports = mongoose.models.Exhibitor || mongoose.model('Exhibitor', exhibitorSchema);
+const ExhibitorModel = mongoose.models.Exhibitor || mongoose.model('Exhibitor', exhibitorSchema);
+if (!mongoose.models.exhibitor) {
+  mongoose.model('exhibitor', exhibitorSchema);
+}
+module.exports = ExhibitorModel;

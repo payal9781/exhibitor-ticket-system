@@ -14,8 +14,9 @@ const chatRequestSchema = new mongoose.Schema({
   },
   senderType: { 
     type: String, 
-    enum: ['visitor', 'exhibitor'], 
-    required: true 
+    enum: ['Visitor', 'Exhibitor', 'visitor', 'exhibitor'], 
+    required: true,
+    set: v => v ? (v.charAt(0).toUpperCase() + v.slice(1)) : v
   },
   receiverId: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -24,8 +25,9 @@ const chatRequestSchema = new mongoose.Schema({
   },
   receiverType: { 
     type: String, 
-    enum: ['visitor', 'exhibitor'], 
-    required: true 
+    enum: ['Visitor', 'Exhibitor', 'visitor', 'exhibitor'], 
+    required: true,
+    set: v => v ? (v.charAt(0).toUpperCase() + v.slice(1)) : v
   },
   status: { 
     type: String, 

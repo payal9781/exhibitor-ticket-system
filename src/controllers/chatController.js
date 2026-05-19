@@ -303,7 +303,7 @@ const getEventUsers = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found', 404);
   }
 
-  // Fetch all chat requests for this event involving the current user
+  // 1. Fetch all chat requests for this event involving the current user
   const chatRequests = await ChatRequest.find({
     eventId,
     $or: [
@@ -329,6 +329,20 @@ const getEventUsers = asyncHandler(async (req, res) => {
     };
   });
 
+  // 2. Fetch all unread messages in this event where the current user is the receiver
+  const unreadMessages = await ChatMessage.find({
+    eventId,
+    receiverId: userId,
+    isRead: false
+  });
+
+  // Map sender's ID to their unread message count for fast O(1) lookup
+  const unreadLookup = {};
+  unreadMessages.forEach(msg => {
+    const senderStr = msg.senderId.toString();
+    unreadLookup[senderStr] = (unreadLookup[senderStr] || 0) + 1;
+  });
+
   // Extract exhibitors (strictly relative paths, filtering out the current user themselves)
   const exhibitors = event.exhibitor
     .filter(e => e.userId && e.userId._id.toString() !== userId.toString())
@@ -339,6 +353,9 @@ const getEventUsers = asyncHandler(async (req, res) => {
       // Inject chat request status
       const requestInfo = requestLookup[user._id.toString()];
       user.chatRequest = requestInfo || null;
+
+      // Inject unread messages count
+      user.unreadCount = unreadLookup[user._id.toString()] || 0;
 
       return user;
     });
@@ -354,6 +371,9 @@ const getEventUsers = asyncHandler(async (req, res) => {
       const requestInfo = requestLookup[user._id.toString()];
       user.chatRequest = requestInfo || null;
 
+      // Inject unread messages count
+      user.unreadCount = unreadLookup[user._id.toString()] || 0;
+
       return user;
     });
 
@@ -365,6 +385,72 @@ const getEventUsers = asyncHandler(async (req, res) => {
     totalExhibitors: exhibitors.length,
     totalVisitors: visitors.length
   });
+});
+
+/**
+ * Upload a chat image file, save it as a chat message in the DB, and broadcast it to the receiver via WebSockets.
+ * Route: POST /api/v1/chat/upload-image
+ */
+const uploadChatImage = asyncHandler(async (req, res) => {
+  const senderId = req.user.id || req.user._id;
+  const senderType = req.user.type; // 'visitor' or 'exhibitor'
+  const { eventId, receiverId, receiverType } = req.body;
+
+  if (!req.file) {
+    return errorResponse(res, 'No image file uploaded', 400);
+  }
+
+  if (!eventId || !receiverId || !receiverType) {
+    return errorResponse(res, 'eventId, receiverId, and receiverType are required', 400);
+  }
+
+  // 1. Verify that a connection request exists and is accepted
+  const activeConnection = await ChatRequest.findOne({
+    eventId,
+    status: 'accepted',
+    $or: [
+      { senderId, receiverId },
+      { senderId: receiverId, receiverId: senderId }
+    ]
+  });
+
+  if (!activeConnection) {
+    return errorResponse(res, 'You can only send messages once the chat request is accepted', 403);
+  }
+
+  // 2. Normalize relative path with forward slashes
+  const relativePath = req.file.path.replace(/\\/g, '/');
+
+  // 3. Save ChatMessage in MongoDB
+  const chatMessage = new ChatMessage({
+    eventId,
+    senderId,
+    senderType,
+    receiverId,
+    receiverType,
+    messageType: 'image',
+    message: relativePath
+  });
+  await chatMessage.save();
+
+  // 4. Populate message details for real-time socket emission
+  const populatedMessage = await ChatMessage.findById(chatMessage._id)
+    .populate({
+      path: 'senderId',
+      select: 'name companyName email phone profileImage fcmToken'
+    })
+    .populate({
+      path: 'receiverId',
+      select: 'name companyName email phone profileImage fcmToken'
+    });
+
+  // 5. Broadcast to the receiver's socket in real-time
+  emitToUser(receiverId.toString(), 'new_message', populatedMessage.toObject());
+
+  successResponse(res, {
+    message: 'Image uploaded and sent successfully',
+    data: populatedMessage
+  }, 201);
 });
 
 /**
@@ -409,6 +495,7 @@ module.exports = {
   sendChatRequest,
   respondToChatRequest,
   getChatRequests,
+  uploadChatImage,
   getChatMessages,
   getEventUsers,
   markMessagesAsRead

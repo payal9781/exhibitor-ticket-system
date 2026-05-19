@@ -54,7 +54,6 @@ const initSocket = (server) => {
         const senderId = socket.user.id;
         const senderType = socket.user.type; // 'visitor' or 'exhibitor'
         const { eventId, receiverId, receiverType, message, messageType = 'text' } = data;
-
         if (!eventId || !receiverId || !receiverType || !message) {
           if (callback) {
             callback({ success: false, error: 'Missing required parameters: eventId, receiverId, receiverType, and message are required' });

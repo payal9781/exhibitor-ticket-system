@@ -39,4 +39,8 @@ visitorSchema.methods.generateAccessToken = function () {
     }
   );
 };
-module.exports = mongoose.models.Visitor || mongoose.model('Visitor', visitorSchema);
+const VisitorModel = mongoose.models.Visitor || mongoose.model('Visitor', visitorSchema);
+if (!mongoose.models.visitor) {
+  mongoose.model('visitor', visitorSchema);
+}
+module.exports = VisitorModel;
