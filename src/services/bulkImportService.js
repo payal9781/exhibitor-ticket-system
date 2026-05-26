@@ -5,6 +5,7 @@ const Organizer = require('../models/Organizer');
 const Event = require('../models/Event');
 const UserEventSlot = require('../models/UserEventSlot');
 const generateSlots = require('../utils/slotGenerator');
+const { buildAddedByFromRequest } = require('../utils/addedByHelper');
 const axios = require('axios');
 
 const isSuperAdmin = (user) =>
@@ -12,7 +13,9 @@ const isSuperAdmin = (user) =>
 
 const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '').slice(-10);
 
-const attachToEvent = async (event, participantId, userType, reqUser) => {
+const attachToEvent = async (event, participantId, userType, reqOrUser) => {
+  const req = reqOrUser?.user ? reqOrUser : { user: reqOrUser };
+  const reqUser = req.user;
   if (reqUser.type === 'organizer' && event.organizerId?.toString() !== reqUser.id) {
     throw Object.assign(new Error('Access denied for this event'), { status: 403 });
   }
@@ -31,11 +34,14 @@ const attachToEvent = async (event, participantId, userType, reqUser) => {
     eventTitle: event.title,
   });
 
+  const addedBy = await buildAddedByFromRequest(req);
+
   array.push({
     userId: participantId,
     qrCode,
     registeredAt: new Date(),
     isVerified: true,
+    addedBy,
   });
 
   await event.save();

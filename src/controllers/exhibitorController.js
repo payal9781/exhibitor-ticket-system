@@ -9,6 +9,8 @@ const UserEventSlot = require('../models/UserEventSlot');
 const Meeting = require('../models/z-index').models.Meeting;
 const mongoose = require('mongoose');
 const generateSlots = require('../utils/slotGenerator');
+const { buildAddedByFromRequest } = require('../utils/addedByHelper');
+
 const createExhibitor = asyncHandler(async (req, res) => {
   const { eventId, ...exhibitorData } = req.body;
   
@@ -156,12 +158,14 @@ const createExhibitor = asyncHandler(async (req, res) => {
       eventTitle: event.title
     };
     qrCode = await require('../utils/qrGenerator')(qrData);
+    const addedBy = await buildAddedByFromRequest(req);
 
     event.exhibitor.push({
       userId: exhibitor._id,
       qrCode,
       registeredAt: new Date(),
-      isVerified: true // Auto-verify exhibitors created by organizer/superadmin
+      isVerified: true,
+      addedBy,
     });
 
     try {
@@ -476,12 +480,14 @@ const updateExhibitor = asyncHandler(async (req, res) => {
       eventTitle: event.title
     };
     qrCode = await require('../utils/qrGenerator')(qrData);
+    const addedBy = await buildAddedByFromRequest(req);
 
     event.exhibitor.push({
       userId: exhibitor._id,
       qrCode,
       registeredAt: new Date(),
-      isVerified: true // Auto-verify exhibitors updated/added by organizer/superadmin
+      isVerified: true,
+      addedBy,
     });
 
     try {

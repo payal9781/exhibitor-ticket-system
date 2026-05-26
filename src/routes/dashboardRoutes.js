@@ -7,6 +7,7 @@ const {
   getRecentActivity,
   getOrganizerAttendeeOverview
 } = require('../controllers/dashboardController');
+const { getOrganizerAnalytics } = require('../controllers/organizerAnalyticsController');
 
 // Dashboard stats routes - Support both GET (for backward compatibility) and POST (for filters)
 router.get('/organizer-stats', authMiddleware(['organizer']), getOrganizerDashboardStats);
@@ -16,5 +17,6 @@ router.post('/super-admin-stats', authMiddleware(['superAdmin']), getSuperAdminD
 router.get('/recent-activity', authMiddleware(['organizer', 'superAdmin']), getRecentActivity);
 router.post('/recent-activity', authMiddleware(['organizer', 'superAdmin']), getRecentActivity);
 router.get('/attendee-overview', authMiddleware(['organizer']), getOrganizerAttendeeOverview);
+router.post('/organizer-analytics', authMiddleware(['superAdmin']), getOrganizerAnalytics);
 
 module.exports = router;

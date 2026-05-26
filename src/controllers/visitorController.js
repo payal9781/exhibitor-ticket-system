@@ -7,6 +7,7 @@ const Exhibitor = require('../models/Exhibitor');
 const UserEventSlot = require('../models/UserEventSlot');
 const Meeting = require('../models/z-index').models.Meeting;
 const generateSlots = require('../utils/slotGenerator');
+const { buildAddedByFromRequest } = require('../utils/addedByHelper');
 
 const createVisitor = asyncHandler(async (req, res) => {
   const { eventId, ...visitorData } = req.body;
@@ -129,12 +130,14 @@ const createVisitor = asyncHandler(async (req, res) => {
       eventTitle: event.title
     };
     qrCode = await require('../utils/qrGenerator')(qrData);
+    const addedBy = await buildAddedByFromRequest(req);
 
     event.visitor.push({
       userId: visitor._id,
       qrCode,
       registeredAt: new Date(),
       isVerified: true,
+      addedBy,
     });
 
     try {
@@ -447,12 +450,14 @@ const updateVisitor = asyncHandler(async (req, res) => {
       eventTitle: event.title
     };
     qrCode = await require('../utils/qrGenerator')(qrData);
+    const addedBy = await buildAddedByFromRequest(req);
 
     event.visitor.push({
       userId: visitor._id,
       qrCode,
       registeredAt: new Date(),
       isVerified: true,
+      addedBy,
     });
 
     try {
