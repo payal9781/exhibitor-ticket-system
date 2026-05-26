@@ -82,7 +82,9 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   }
 
   // Public self-registration always requires organizer/admin approval
-  const isVerified = !requiresRegistrationApproval();
+  const needsApproval = requiresRegistrationApproval();
+  const isVerified = !needsApproval;
+  const approvalStatus = needsApproval ? 'pending' : 'approved';
 
   let exhibitor;
   let isNewExhibitor = false;
@@ -172,6 +174,7 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     qrCode,
     registeredAt: new Date(),
     isVerified,
+    approvalStatus,
     addedBy: {
       userId: exhibitor._id,
       userType: 'Exhibitor',
@@ -254,7 +257,9 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   }
 
   // Public self-registration always requires organizer/admin approval
-  const isVerified = !requiresRegistrationApproval();
+  const needsApproval = requiresRegistrationApproval();
+  const isVerified = !needsApproval;
+  const approvalStatus = needsApproval ? 'pending' : 'approved';
 
   let visitor;
   let isNewVisitor = false;
@@ -362,6 +367,7 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     qrCode,
     registeredAt: new Date(),
     isVerified,
+    approvalStatus,
     addedBy: {
       userId: visitor._id,
       userType: 'Visitor',

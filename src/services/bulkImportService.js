@@ -41,6 +41,7 @@ const attachToEvent = async (event, participantId, userType, reqOrUser) => {
     qrCode,
     registeredAt: new Date(),
     isVerified: true,
+    approvalStatus: 'approved',
     addedBy,
   });
 

@@ -137,6 +137,7 @@ const createVisitor = asyncHandler(async (req, res) => {
       qrCode,
       registeredAt: new Date(),
       isVerified: true,
+      approvalStatus: 'approved',
       addedBy,
     });
 
@@ -457,6 +458,7 @@ const updateVisitor = asyncHandler(async (req, res) => {
       qrCode,
       registeredAt: new Date(),
       isVerified: true,
+      approvalStatus: 'approved',
       addedBy,
     });
 

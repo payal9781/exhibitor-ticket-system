@@ -41,6 +41,15 @@ const eventSchema = new mongoose.Schema({
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now },
     isVerified: { type: Boolean, default: false },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    rejectedAt: { type: Date, default: null },
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+    rejectedByType: { type: String, enum: ['organizer', 'superAdmin', null], default: null },
+    rejectedByName: { type: String, default: '' },
     addedBy: { 
       userId: { type: mongoose.Schema.Types.ObjectId, refPath: 'exhibitor.addedBy.userType' },
       userType: { type: String, enum: ['Organizer', 'Superadmin', 'Exhibitor', 'Visitor'] },
@@ -53,6 +62,15 @@ const eventSchema = new mongoose.Schema({
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now },
     isVerified: { type: Boolean, default: false },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    rejectedAt: { type: Date, default: null },
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+    rejectedByType: { type: String, enum: ['organizer', 'superAdmin', null], default: null },
+    rejectedByName: { type: String, default: '' },
     addedBy: { 
       userId: { type: mongoose.Schema.Types.ObjectId, refPath: 'visitor.addedBy.userType' },
       userType: { type: String, enum: ['Organizer', 'Superadmin', 'Exhibitor', 'Visitor'] },

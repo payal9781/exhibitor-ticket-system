@@ -929,20 +929,24 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
   if (participantType === 'exhibitor') {
     const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === participant._id.toString());
     if (!existingExhibitor) {
-      event.exhibitor.push({ 
-        userId: participant._id, 
+      event.exhibitor.push({
+        userId: participant._id,
         qrCode,
-        addedBy: addedByInfo
+        isVerified: true,
+        approvalStatus: 'approved',
+        addedBy: addedByInfo,
       });
       isNewRegistration = true;
     }
   } else {
     const existingVisitor = event.visitor.find(vis => vis.userId.toString() === participant._id.toString());
     if (!existingVisitor) {
-      event.visitor.push({ 
-        userId: participant._id, 
+      event.visitor.push({
+        userId: participant._id,
         qrCode,
-        addedBy: addedByInfo
+        isVerified: true,
+        approvalStatus: 'approved',
+        addedBy: addedByInfo,
       });
       isNewRegistration = true;
     }
@@ -1319,12 +1323,14 @@ const addParticipantToEventComprehensive = asyncHandler(async (req, res) => {
     userId,
     qrCode,
     registeredAt: new Date(),
+    isVerified: true,
+    approvalStatus: 'approved',
     addedBy: {
       userId: req.user.id,
       userType: req.user.type === 'organizer' ? 'Organizer' : 'Superadmin',
       name: adminName,
-      addedAt: new Date()
-    }
+      addedAt: new Date(),
+    },
   };
 
   if (userType === 'exhibitor') {

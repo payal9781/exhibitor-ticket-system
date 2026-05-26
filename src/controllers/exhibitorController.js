@@ -165,6 +165,7 @@ const createExhibitor = asyncHandler(async (req, res) => {
       qrCode,
       registeredAt: new Date(),
       isVerified: true,
+      approvalStatus: 'approved',
       addedBy,
     });
 
@@ -487,6 +488,7 @@ const updateExhibitor = asyncHandler(async (req, res) => {
       qrCode,
       registeredAt: new Date(),
       isVerified: true,
+      approvalStatus: 'approved',
       addedBy,
     });
 

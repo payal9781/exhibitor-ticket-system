@@ -5,9 +5,22 @@ const Organizer = require('../models/Organizer');
 const Superadmin = require('../models/Superadmin');
 const ApprovalLog = require('../models/ApprovalLog');
 const emailService = require('./emailService');
+const { isEventRegistrationClosed } = require('../utils/eventDateUtils');
+
+const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'];
 
 const isSuperAdmin = (user) =>
   user?.type === 'superAdmin' || user?.type === 'superadmin';
+
+/** Resolve status for legacy records without approvalStatus */
+const resolveApprovalStatus = (participant) => {
+  if (participant.approvalStatus && APPROVAL_STATUSES.includes(participant.approvalStatus)) {
+    return participant.approvalStatus;
+  }
+  if (participant.isVerified === true) return 'approved';
+  if (participant.rejectedAt || participant.rejectedBy) return 'rejected';
+  return 'pending';
+};
 
 const canManageEvent = (user, event) =>
   isSuperAdmin(user) ||
@@ -148,53 +161,7 @@ const notifyAdminsOfOrganizerApproval = async (event, participant, userType, app
   return { success: results.some((r) => r.success), count: results.filter((r) => r.success).length };
 };
 
-const getPendingApprovals = async (user, { eventId, userType, page = 1, limit = 20 } = {}) => {
-  const eventQuery = { isDeleted: false };
-  if (eventId) eventQuery._id = eventId;
-  if (!isSuperAdmin(user)) {
-    eventQuery.$or = [
-      { organizerId: user.id },
-      { createdByAdminId: user.id },
-    ];
-  }
-
-  const events = await Event.find(eventQuery)
-    .select('title fromDate toDate startTime endTime location organizerId createdByAdminId exhibitor visitor')
-    .populate('organizerId', 'name email organizationName')
-    .populate('createdByAdminId', 'name email')
-    .lean();
-
-  const rows = [];
-  for (const event of events) {
-    const pushPending = (participants, type) => {
-      (participants || [])
-        .filter((p) => p.isVerified !== true && p.userId)
-        .forEach((p) => {
-          if (userType && userType !== type) return;
-          rows.push({
-            eventId: event._id,
-            eventTitle: event.title,
-            eventFromDate: event.fromDate,
-            eventToDate: event.toDate,
-            eventLocation: event.location,
-            organizerName:
-              event.organizerId?.organizationName ||
-              event.organizerId?.name ||
-              event.createdByAdminId?.name ||
-              'Admin',
-            userId: p.userId,
-            userType: type,
-            participantId: p._id,
-            registeredAt: p.registeredAt,
-          });
-        });
-    };
-    pushPending(event.exhibitor, 'exhibitor');
-    pushPending(event.visitor, 'visitor');
-  }
-
-  rows.sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
-
+const enrichParticipantRows = async (rows) => {
   const exhibitorIds = [...new Set(rows.filter((r) => r.userType === 'exhibitor').map((r) => String(r.userId)))];
   const visitorIds = [...new Set(rows.filter((r) => r.userType === 'visitor').map((r) => String(r.userId)))];
 
@@ -206,35 +173,115 @@ const getPendingApprovals = async (user, { eventId, userType, page = 1, limit = 
   const exMap = Object.fromEntries(exhibitors.map((e) => [String(e._id), e]));
   const visMap = Object.fromEntries(visitors.map((v) => [String(v._id), v]));
 
-  const enriched = rows.map((r) => {
+  return rows.map((r) => {
     const profile = r.userType === 'exhibitor' ? exMap[String(r.userId)] : visMap[String(r.userId)];
     return {
       ...r,
+      approvalStatus: r.approvalStatus,
       name: r.userType === 'exhibitor' ? profile?.companyName || 'Exhibitor' : profile?.name || 'Visitor',
       email: profile?.email || '',
       phone: profile?.phone || '',
       companyName: profile?.companyName || '',
     };
   });
+};
 
+const paginateRows = (enriched, page, limit) => {
   const totalItems = enriched.length;
   const totalPages = Math.ceil(totalItems / limit) || 1;
   const start = (page - 1) * limit;
-  const pending = enriched.slice(start, start + limit);
-
-  const visitorCount = enriched.filter((r) => r.userType === 'visitor').length;
-  const exhibitorCount = enriched.filter((r) => r.userType === 'exhibitor').length;
-
   return {
-    pending,
-    summary: { total: totalItems, visitor: visitorCount, exhibitor: exhibitorCount },
+    items: enriched.slice(start, start + limit),
     pagination: {
       currentPage: page,
       totalPages,
       totalItems,
       itemsPerPage: limit,
     },
+    summary: {
+      total: totalItems,
+      visitor: enriched.filter((r) => r.userType === 'visitor').length,
+      exhibitor: enriched.filter((r) => r.userType === 'exhibitor').length,
+    },
   };
+};
+
+const listRegistrationsByStatus = async (user, status, { eventId, userType, page = 1, limit = 20 } = {}) => {
+  if (!APPROVAL_STATUSES.includes(status)) {
+    throw Object.assign(new Error('Invalid approval status filter'), { status: 400 });
+  }
+
+  const eventQuery = { isDeleted: false };
+  if (eventId) eventQuery._id = eventId;
+  if (!isSuperAdmin(user)) {
+    eventQuery.$or = [{ organizerId: user.id }, { createdByAdminId: user.id }];
+  }
+
+  const events = await Event.find(eventQuery)
+    .select(
+      'title fromDate toDate startTime endTime location organizerId createdByAdminId exhibitor visitor'
+    )
+    .populate('organizerId', 'name email organizationName')
+    .populate('createdByAdminId', 'name email')
+    .lean();
+
+  const rows = [];
+  for (const event of events) {
+    if (isEventRegistrationClosed(event)) continue;
+
+    const collect = (participants, type) => {
+      (participants || []).forEach((p) => {
+        if (!p.userId) return;
+        if (userType && userType !== type) return;
+        const resolved = resolveApprovalStatus(p);
+        if (resolved !== status) return;
+
+        rows.push({
+          eventId: event._id,
+          eventTitle: event.title,
+          eventFromDate: event.fromDate,
+          eventToDate: event.toDate,
+          eventLocation: event.location,
+          organizerName:
+            event.organizerId?.organizationName ||
+            event.organizerId?.name ||
+            event.createdByAdminId?.name ||
+            'Admin',
+          userId: p.userId,
+          userType: type,
+          participantId: p._id,
+          registeredAt: p.registeredAt,
+          approvalStatus: resolved,
+          rejectedAt: p.rejectedAt,
+          rejectedByName: p.rejectedByName,
+          approvedAt: resolved === 'approved' ? p.registeredAt : undefined,
+        });
+      });
+    };
+    collect(event.exhibitor, 'exhibitor');
+    collect(event.visitor, 'visitor');
+  }
+
+  rows.sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
+  const enriched = await enrichParticipantRows(rows);
+  const { items, pagination, summary } = paginateRows(enriched, page, limit);
+
+  return { items, summary, pagination };
+};
+
+const getPendingApprovals = async (user, filters) => {
+  const { items, summary, pagination } = await listRegistrationsByStatus(user, 'pending', filters);
+  return { pending: items, summary, pagination };
+};
+
+const getApprovedRegistrations = async (user, filters) => {
+  const { items, summary, pagination } = await listRegistrationsByStatus(user, 'approved', filters);
+  return { approved: items, summary, pagination };
+};
+
+const getRejectedRegistrations = async (user, filters) => {
+  const { items, summary, pagination } = await listRegistrationsByStatus(user, 'rejected', filters);
+  return { rejected: items, summary, pagination };
 };
 
 const processApproval = async (user, { eventId, userId, userType }) => {
@@ -253,20 +300,35 @@ const processApproval = async (user, { eventId, userId, userType }) => {
     throw Object.assign(new Error('Unauthorized to approve participants for this event'), { status: 403 });
   }
 
+  if (isEventRegistrationClosed(event)) {
+    throw Object.assign(new Error('Cannot approve registrations for an ended event'), { status: 400 });
+  }
+
   const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
   const participant = participantArray.find((p) => p.userId.toString() === userId);
   if (!participant) {
     throw Object.assign(new Error(`${userType} not found in event`), { status: 404 });
   }
 
-  if (participant.isVerified) {
-    return {
-      message: `${userType.charAt(0).toUpperCase() + userType.slice(1)} is already verified`,
-      alreadyVerified: true,
-    };
+  const currentStatus = resolveApprovalStatus(participant);
+  if (currentStatus === 'approved') {
+    throw Object.assign(
+      new Error(`${userType.charAt(0).toUpperCase() + userType.slice(1)} is already approved`),
+      { status: 400 }
+    );
+  }
+  if (currentStatus !== 'pending' && currentStatus !== 'rejected') {
+    throw Object.assign(new Error('Only pending or rejected registrations can be approved'), {
+      status: 400,
+    });
   }
 
   participant.isVerified = true;
+  participant.approvalStatus = 'approved';
+  participant.rejectedAt = null;
+  participant.rejectedBy = null;
+  participant.rejectedByType = null;
+  participant.rejectedByName = '';
   await event.save();
 
   const approver = await getApproverProfile(user);
@@ -293,6 +355,7 @@ const processApproval = async (user, { eventId, userId, userType }) => {
     participantType: userType,
     participantName: profile.name,
     participantEmail: profile.email,
+    action: 'approved',
     approvedBy: user.id,
     approvedByType: approver.type,
     approvedByName: approver.name,
@@ -314,6 +377,101 @@ const processApproval = async (user, { eventId, userId, userType }) => {
       confirmationEmailSent: confirmationResult.success,
       organizerNotified,
       adminsNotified,
+    },
+  };
+};
+
+const sendParticipantRejectionEmail = async (event, participant, userType) => {
+  if (!participant.email) {
+    return { success: false, message: 'No participant email' };
+  }
+  const roleLabel = userType === 'exhibitor' ? 'Exhibitor' : 'Visitor';
+  const subject = `Registration update — ${event.title}`;
+  const html = `
+    <p>Your <strong>${roleLabel}</strong> registration for <strong>${event.title}</strong> was not approved at this time.</p>
+    <p>If you believe this was a mistake, please contact the event organizer.</p>
+  `;
+  return emailService.sendCustomEmail(participant.email, subject, html, participant.name);
+};
+
+const processRejection = async (user, { eventId, userId, userType, reason } = {}) => {
+  if (!['exhibitor', 'visitor'].includes(userType)) {
+    throw Object.assign(new Error('Invalid user type'), { status: 400 });
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event || event.isDeleted) {
+    throw Object.assign(new Error('Event not found'), { status: 404 });
+  }
+
+  if (!canManageEvent(user, event)) {
+    throw Object.assign(new Error('Unauthorized to reject participants for this event'), { status: 403 });
+  }
+
+  if (isEventRegistrationClosed(event)) {
+    throw Object.assign(new Error('Cannot reject registrations for an ended event'), { status: 400 });
+  }
+
+  const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
+  const participant = participantArray.find((p) => p.userId.toString() === userId);
+  if (!participant) {
+    throw Object.assign(new Error(`${userType} not found in event`), { status: 404 });
+  }
+
+  const currentStatus = resolveApprovalStatus(participant);
+  if (currentStatus === 'rejected') {
+    throw Object.assign(
+      new Error(`${userType.charAt(0).toUpperCase() + userType.slice(1)} is already rejected`),
+      { status: 400 }
+    );
+  }
+  if (currentStatus !== 'pending' && currentStatus !== 'approved') {
+    throw Object.assign(new Error('Only pending or approved registrations can be rejected'), {
+      status: 400,
+    });
+  }
+
+  const rejector = await getApproverProfile(user);
+
+  participant.isVerified = false;
+  participant.approvalStatus = 'rejected';
+  participant.rejectedAt = new Date();
+  participant.rejectedBy = user.id;
+  participant.rejectedByType = rejector.type;
+  participant.rejectedByName = rejector.name;
+  await event.save();
+
+  const profile = await getParticipantProfile(userId, userType);
+  const emailResult = await sendParticipantRejectionEmail(event, profile, userType);
+
+  await ApprovalLog.create({
+    eventId: event._id,
+    eventTitle: event.title,
+    participantUserId: userId,
+    participantType: userType,
+    participantName: profile.name,
+    participantEmail: profile.email,
+    action: 'rejected',
+    approvedBy: user.id,
+    approvedByType: rejector.type,
+    approvedByName: rejector.name,
+    approvedByEmail: rejector.email,
+    rejectionReason: reason?.trim() || '',
+    confirmationEmailSent: emailResult.success,
+    organizerNotified: false,
+    adminsNotified: false,
+  });
+
+  return {
+    message: `${userType.charAt(0).toUpperCase() + userType.slice(1)} rejected successfully`,
+    participant: {
+      userId: participant.userId,
+      isVerified: participant.isVerified,
+      approvalStatus: participant.approvalStatus,
+      rejectedAt: participant.rejectedAt,
+    },
+    notifications: {
+      rejectionEmailSent: emailResult.success,
     },
   };
 };
@@ -354,7 +512,11 @@ const getApprovalHistory = async (user, { page = 1, limit = 10, eventId } = {}) 
 
 module.exports = {
   isSuperAdmin,
+  resolveApprovalStatus,
   getPendingApprovals,
+  getApprovedRegistrations,
+  getRejectedRegistrations,
   processApproval,
+  processRejection,
   getApprovalHistory,
 };
