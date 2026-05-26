@@ -17,8 +17,10 @@ const {
   bulkCheckIn,
   getVisitorsWithAttendance
 } = require('../controllers/visitorController');
+const { importVisitors } = require('../controllers/importController');
 
 router.post('/create', authMiddleware(['organizer', 'superAdmin']), createVisitor);
+router.post('/import', authMiddleware(['organizer', 'superAdmin']), importVisitors);
 router.post('/list', authMiddleware(['organizer', 'superAdmin']), getVisitors);
 router.post('/get', authMiddleware(['organizer', 'superAdmin']), getVisitorById);
 router.post('/update', authMiddleware(['organizer', 'superAdmin']), updateVisitor);

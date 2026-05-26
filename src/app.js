@@ -54,9 +54,10 @@ app.get('/register/:registrationLink', async (req, res) => {
         error: 'Event not found',
       });
     }
-    // Check if event registration is still valid (before event end date)
+    // Registration open through end of event's last day
     const currentDate = new Date();
     const eventEndDate = new Date(event.toDate);
+    eventEndDate.setHours(23, 59, 59, 999);
     if (currentDate > eventEndDate) {
       return res.status(400).render('error', {
         title: 'Registration Closed',

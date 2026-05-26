@@ -12,6 +12,9 @@ const models = {
   ScannedCards: require('./ScannedCards'),
   Leads : require('./leads'),
   Otp: require('./Otp'),
+  OtpSettings: require('./OtpSettings'),
+  AdminNotificationLog: require('./AdminNotificationLog'),
+  Notification: require('./notification'),
 };
 
 module.exports = { models };

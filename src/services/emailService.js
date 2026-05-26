@@ -351,8 +351,68 @@ const sendWelcomeEmail = async (name, email, rawPassword) => {
   }
 };
 
+const sendCustomEmail = async (to, subject, htmlContent, recipientName = 'User') => {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.error('CRITICAL: SMTP configuration is missing in .env file!');
+    return { success: false, message: 'SMTP not configured' };
+  }
+
+  if (!to || !to.trim()) {
+    return { success: false, message: 'No email address' };
+  }
+
+  const transporter = createTransporter();
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to: to.trim(),
+    subject: subject || 'Notification from Planora',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${subject || 'Planora Notification'}</title>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #334155; max-width: 600px; margin: 0 auto; padding: 0; background-color: #f8fafc; }
+          .container { margin: 40px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+          .header { background: linear-gradient(135deg, #C73A33 0%, #E5534B 100%); color: white; padding: 32px 20px; text-align: center; }
+          .header h1 { margin: 0; font-size: 24px; font-weight: 800; }
+          .content { padding: 32px; }
+          .greeting { font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
+          .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 13px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header"><h1>Planora</h1></div>
+          <div class="content">
+            <p class="greeting">Hello ${recipientName},</p>
+            ${htmlContent}
+            <p style="margin-top: 24px;">Best regards,<br><strong>The Planora Team</strong></p>
+          </div>
+          <div class="footer">
+            <p>This is an automated message from Planora Admin.</p>
+            <p>&copy; ${new Date().getFullYear()} Planora. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending custom email:', error);
+    return { success: false, message: error.message };
+  }
+};
+
 module.exports = {
   sendPasswordResetEmail,
   sendWelcomeEmail,
-  testEmailConfig
+  testEmailConfig,
+  sendCustomEmail,
 };

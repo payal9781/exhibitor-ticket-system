@@ -10,8 +10,10 @@ const {
   getOrganizerStats,
   toggleOrganizerStatus
 } = require('../controllers/organizerController');
+const { importOrganizers } = require('../controllers/importController');
 
 router.post('/create', authMiddleware(['superAdmin']), createOrganizer);
+router.post('/import', authMiddleware(['superAdmin']), importOrganizers);
 router.post('/list', authMiddleware(['superAdmin']), getOrganizers);
 router.post('/get', authMiddleware(['superAdmin']), getOrganizerById);
 router.post('/update', authMiddleware(['superAdmin']), updateOrganizer);

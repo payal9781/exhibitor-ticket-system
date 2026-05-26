@@ -13,6 +13,11 @@ const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs/promises');
 const {v4:uuidv4} = require('uuid');
+const approvalService = require('../services/approvalService');
+const Organizer = require('../models/Organizer');
+
+const isSuperAdminUser = (user) =>
+  user?.type === 'superAdmin' || user?.type === 'superadmin';
 const uploadDir = path.join(__dirname, '..', 'uploads', 'banners');
 fs.mkdir(uploadDir, { recursive: true }).catch(err => console.error('Failed to create upload directory:', err));
 
@@ -86,9 +91,35 @@ const createEvent = asyncHandler(async (req, res) => {
     }
   }
 
+  let organizerId = req.user.id;
+  let createdByAdminId = null;
+
+  if (isSuperAdminUser(req.user)) {
+    const platformManaged =
+      eventData.platformManaged === true ||
+      eventData.platformManaged === 'true';
+    const assignedOrganizerId = eventData.organizerId;
+
+    if (platformManaged || !assignedOrganizerId) {
+      createdByAdminId = req.user.id;
+    } else {
+      const organizer = await Organizer.findOne({
+        _id: assignedOrganizerId,
+        isDeleted: { $ne: true },
+      });
+      if (!organizer) {
+        return res.status(400).json({ message: 'Selected organizer not found' });
+      }
+      organizerId = organizer._id;
+    }
+    delete eventData.organizerId;
+    delete eventData.platformManaged;
+  }
+
   const event = new Event({
     ...eventData,
-    organizerId: req.user.id,
+    organizerId: createdByAdminId ? undefined : organizerId,
+    createdByAdminId,
     media: mediaData,
     schedules: parsedSchedules,
   });
@@ -223,7 +254,7 @@ const deleteSchedule = asyncHandler(async (req, res) => {
 });
 
 const getEvents = asyncHandler(async (req, res) => {
-  const { organizerId, includeInactive = false, search, page = 1, limit = 10 } = req.body;
+  const { organizerId, includeInactive = false, search, page = 1, limit = 10, status } = req.body;
   let query = { isDeleted: false };
 
   if (!includeInactive) {
@@ -231,7 +262,7 @@ const getEvents = asyncHandler(async (req, res) => {
   }
 
   if (req.user.type === 'organizer') query.organizerId = req.user.id;
-  if (req.user.type === 'superadmin' && organizerId) query.organizerId = organizerId;
+  if (isSuperAdminUser(req.user) && organizerId) query.organizerId = organizerId;
 
   if (search && search.trim()) {
     query.$or = [
@@ -241,11 +272,26 @@ const getEvents = asyncHandler(async (req, res) => {
     ];
   }
 
+  const now = new Date();
+  if (status === 'upcoming') {
+    query.fromDate = { $gt: now };
+  } else if (status === 'ongoing') {
+    query.fromDate = { $lte: now };
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    query.toDate = { $gte: startOfToday };
+  } else if (status === 'ended') {
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    query.toDate = { $lt: startOfToday };
+  }
+
   const skip = (page - 1) * limit;
   const total = await Event.countDocuments(query);
 
   const events = await Event.find(query)
     .populate('organizerId', 'name email organizationName')
+    .populate('createdByAdminId', 'name email')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit));
@@ -604,7 +650,18 @@ const registerByLink = asyncHandler(async (req, res) => {
   const existingParticipantInEvent = participantArray.find(p => p.userId.toString() === participant._id.toString());
 
   if (!existingParticipantInEvent) {
-    participantArray.push({ userId: participant._id, qrCode });
+    participantArray.push({
+      userId: participant._id,
+      qrCode,
+      registeredAt: new Date(),
+      isVerified: false,
+      addedBy: {
+        userId: participant._id,
+        userType: type === 'exhibitor' ? 'Exhibitor' : 'Visitor',
+        name: type === 'exhibitor' ? participant.companyName : participant.name,
+        addedAt: new Date(),
+      },
+    });
     isNewRegistration = true;
   } else {
     return errorResponse(res, `${type} already registered for this event`, 400);
@@ -1805,67 +1862,21 @@ const getSponsors = asyncHandler(async (req, res) => {
 
 
 const approveParticipant = asyncHandler(async (req, res) => {
-  console.log('[approveParticipant] Request received');
   const { eventId, userId, userType } = req.body;
 
-  console.log(`[approveParticipant] Start: eventId=${eventId}, userId=${userId}, userType=${userType}`);
-
-  // Validate userType
   if (!['exhibitor', 'visitor'].includes(userType)) {
-    console.error(`[approveParticipant] Invalid userType: ${userType}`);
     return errorResponse(res, 'Invalid user type. Must be "exhibitor" or "visitor".', 400);
   }
 
-  // Find the event
-  console.log(`[approveParticipant] Fetching event: eventId=${eventId}`);
-  const event = await Event.findById(eventId);
-  if (!event || event.isDeleted) {
-    console.error(`[approveParticipant] Event not found or deleted: eventId=${eventId}`);
-    return errorResponse(res, 'Event not found', 404);
+  try {
+    const result = await approvalService.processApproval(req.user, { eventId, userId, userType });
+    if (result.alreadyVerified) {
+      return successResponse(res, { message: result.message });
+    }
+    return successResponse(res, result);
+  } catch (error) {
+    return errorResponse(res, error.message, error.status || 500);
   }
-
-  // Check if the user is authorized (organizer or superAdmin)
-  const user = req.user; // Assuming req.user is set by authentication middleware
-  console.log(`[approveParticipant] User: id=${user.id}, type=${user.type}`);
-  if (user.type !== 'superAdmin' && event.organizerId.toString() !== user.id) {
-    console.error(`[approveParticipant] Unauthorized user: id=${user.id}, organizerId=${event.organizerId}`);
-    return errorResponse(res, 'Unauthorized to approve participants for this event', 403);
-  }
-
-  // Find and update the participant
-  console.log(`[approveParticipant] Searching for participant: userId=${userId}, userType=${userType}`);
-  const participantArray = userType === 'exhibitor' ? event.exhibitor : event.visitor;
-  const participant = participantArray.find(p => p.userId.toString() === userId);
-  if (!participant) {
-    console.error(`[approveParticipant] Participant not found: userId=${userId}, userType=${userType}, eventId=${eventId}`);
-    return errorResponse(res, `${userType.charAt(0).toUpperCase() + userType.slice(1)} not found in event`, 404);
-  }
-
-  if (participant.isVerified) {
-    console.log(`[approveParticipant] Participant already verified: userId=${userId}, userType=${userType}`);
-    return successResponse(res, {
-      message: `${userType.charAt(0).toUpperCase() + userType.slice(1)} is already verified`,
-    });
-  }
-
-  console.log(`[approveParticipant] Updating participant: userId=${userId}, userType=${userType}`);
-  participant.isVerified = true;
-  await event.save();
-
-  console.log(`[approveParticipant] Participant approved: userId=${userId}, userType=${userType}, eventId=${eventId}`);
-
-  // Optionally, notify the participant (e.g., via email or notification system)
-  // Add your notification logic here if needed
-
-  successResponse(res, {
-    message: `${userType.charAt(0).toUpperCase() + userType.slice(1)} approved successfully`,
-    participant: {
-      userId: participant.userId,
-      isVerified: participant.isVerified,
-      registeredAt: participant.registeredAt,
-      qrCode: participant.qrCode,
-    },
-  });
 });
 
 module.exports = {

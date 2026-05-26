@@ -12,10 +12,62 @@ class OTPService {
         // OTP Configuration
         this.otpExpiryMinutes = parseInt(process.env.OTP_EXPIRY_MINUTES) || 10;
         this.bypassOTP = process.env.BYPASS_OTP || '2345';
+        this.settingsCache = null;
         
         // Load bypass numbers
         this.bypassNumbers = [];
         this.refreshBypassNumbers();
+    }
+
+    async getSettings() {
+        if (this.settingsCache) {
+            return this.settingsCache;
+        }
+
+        let settings = await models.OtpSettings.findOne({ key: 'default' });
+
+        if (!settings) {
+            settings = await models.OtpSettings.create({
+                key: 'default',
+                bypassOtpEnabled: true,
+                bypassOtp: this.bypassOTP,
+            });
+        }
+
+        this.settingsCache = {
+            bypassOtpEnabled: settings.bypassOtpEnabled,
+            bypassOtp: settings.bypassOtp || this.bypassOTP,
+            bypassNumbers: settings.bypassNumbers || [],
+        };
+
+        return this.settingsCache;
+    }
+
+    async updateSettings(updates) {
+        const settings = await models.OtpSettings.findOneAndUpdate(
+            { key: 'default' },
+            {
+                $set: updates,
+                $setOnInsert: {
+                    key: 'default',
+                    bypassOtpEnabled: true,
+                    bypassOtp: this.bypassOTP,
+                },
+            },
+            { new: true, upsert: true }
+        );
+
+        this.settingsCache = {
+            bypassOtpEnabled: settings.bypassOtpEnabled,
+            bypassOtp: settings.bypassOtp || this.bypassOTP,
+            bypassNumbers: settings.bypassNumbers || [],
+        };
+
+        return this.settingsCache;
+    }
+
+    clearSettingsCache() {
+        this.settingsCache = null;
     }
 
     refreshBypassNumbers() {
@@ -188,12 +240,25 @@ class OTPService {
                     message: 'OTP expired or not found'
                 };
             }
+
+            const settings = await this.getSettings();
+
+            // Global bypass OTP — works even when a real OTP was sent
+            if (settings.bypassOtpEnabled && normalizedOTPCode === settings.bypassOtp) {
+                console.log(`[OTP] Global bypass OTP accepted for ${normalizedMobileNo}`);
+                otpRecord.isUsed = true;
+                await otpRecord.save();
+                return {
+                    success: true,
+                    message: 'OTP verified successfully'
+                };
+            }
     
-            // Bypass OTP verification
+            // Bypass OTP verification:
             if (otpRecord.sessionId.startsWith('BYPASS-')) {
                 console.log(`[OTP] Processing bypass verification for ${normalizedMobileNo}`);
                 
-                if (normalizedOTPCode === this.bypassOTP) {
+                if (normalizedOTPCode === settings.bypassOtp) {
                     otpRecord.isUsed = true;
                     await otpRecord.save();
                     return {

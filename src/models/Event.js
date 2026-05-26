@@ -5,7 +5,14 @@ const eventSchema = new mongoose.Schema({
   organizerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Organizer',
-    required: true
+    required: function () {
+      return !this.createdByAdminId;
+    },
+  },
+  createdByAdminId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Superadmin',
+    default: null,
   },
   title: { type: String, required: true },
   description: { type: String },
@@ -33,7 +40,7 @@ const eventSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Exhibitor" },
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now },
-    isVerified: { type: Boolean, default: true },
+    isVerified: { type: Boolean, default: false },
     addedBy: { 
       userId: { type: mongoose.Schema.Types.ObjectId, refPath: 'exhibitor.addedBy.userType' },
       userType: { type: String, enum: ['Organizer', 'Superadmin', 'Exhibitor', 'Visitor'] },
@@ -45,7 +52,7 @@ const eventSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Visitor" },
     qrCode: { type: String },
     registeredAt: { type: Date, default: Date.now },
-    isVerified: { type: Boolean, default: true },
+    isVerified: { type: Boolean, default: false },
     addedBy: { 
       userId: { type: mongoose.Schema.Types.ObjectId, refPath: 'visitor.addedBy.userType' },
       userType: { type: String, enum: ['Organizer', 'Superadmin', 'Exhibitor', 'Visitor'] },

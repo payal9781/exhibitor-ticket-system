@@ -6,6 +6,11 @@ const Visitor = require('../models/Visitor');
 const axios = require('axios');
 const UserEventSlot = require('../models/UserEventSlot');
 const generateSlots = require('../utils/slotGenerator');
+const {
+  getEventEndDate,
+  isEventRegistrationClosed,
+  requiresRegistrationApproval,
+} = require('../utils/eventDateUtils');
 
 // Get event registration details by registration link
 const getEventByRegistrationLink = asyncHandler(async (req, res) => {
@@ -14,21 +19,31 @@ const getEventByRegistrationLink = asyncHandler(async (req, res) => {
   const event = await Event.findOne({
     registrationLink,
     isDeleted: false
-  }).populate('organizerId', 'name email organizationName');
+  }).populate('organizerId', 'name email organizationName')
+    .populate('createdByAdminId', 'name email');
 
   if (!event) {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
 
-  // Check if event registration is still valid (before event start date)
-  const currentDate = new Date();
-  const eventToDate = new Date(event.toDate);
-
-  if (currentDate > eventToDate) {
-    return errorResponse(res, 'Registration for this event has closed. The event has already started.', 400);
+  if (isEventRegistrationClosed(event)) {
+    return errorResponse(res, 'Registration for this event has closed. The event has ended.', 400);
   }
 
-  // Return event details for registration page
+  const organizer = event.organizerId
+    ? {
+        name: event.organizerId.name,
+        email: event.organizerId.email,
+        organizationName: event.organizerId.organizationName,
+      }
+    : event.createdByAdminId
+      ? {
+          name: event.createdByAdminId.name,
+          email: event.createdByAdminId.email,
+          organizationName: 'Platform Admin',
+        }
+      : null;
+
   successResponse(res, {
     event: {
       _id: event._id,
@@ -40,7 +55,7 @@ const getEventByRegistrationLink = asyncHandler(async (req, res) => {
       endTime: event.endTime,
       location: event.location,
       media: event.media,
-      organizer: event.organizerId,
+      organizer,
       extraDetails: event.extraDetails
     }
   });
@@ -60,17 +75,14 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
 
-  const currentDate = new Date();
-  const eventFromDate = new Date(event.fromDate);
-  const eventToDate = new Date(event.toDate);
+  const eventEndDate = getEventEndDate(event.toDate);
 
-  // Check if registration is closed
-  if (currentDate > eventToDate) {
+  if (new Date() > eventEndDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already ended.', 400);
   }
 
-  // Determine verification status
-  const isVerified = !(currentDate >= eventFromDate && currentDate <= eventToDate);
+  // Public self-registration always requires organizer/admin approval
+  const isVerified = !requiresRegistrationApproval();
 
   let exhibitor;
   let isNewExhibitor = false;
@@ -235,17 +247,14 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Event not found or registration link is invalid', 404);
   }
 
-  const currentDate = new Date();
-  const eventFromDate = new Date(event.fromDate);
-  const eventToDate = new Date(event.toDate);
+  const eventEndDate = getEventEndDate(event.toDate);
 
-  // Check if registration is closed
-  if (currentDate > eventToDate) {
+  if (new Date() > eventEndDate) {
     return errorResponse(res, 'Registration for this event has closed. The event has already ended.', 400);
   }
 
-  // Determine verification status
-  const isVerified = !(currentDate >= eventFromDate && currentDate <= eventToDate);
+  // Public self-registration always requires organizer/admin approval
+  const isVerified = !requiresRegistrationApproval();
 
   let visitor;
   let isNewVisitor = false;
@@ -572,10 +581,16 @@ const registerForMultipleEvents = asyncHandler(async (req, res) => {
       const qrCode = await require('../utils/qrGenerator')(qrData);
 
       // Add to event
+      const pendingEntry = {
+        userId: participant._id,
+        qrCode,
+        registeredAt: new Date(),
+        isVerified: false,
+      };
       if (participantType === 'exhibitor') {
-        event.exhibitor.push({ userId: participant._id, qrCode });
+        event.exhibitor.push(pendingEntry);
       } else {
-        event.visitor.push({ userId: participant._id, qrCode });
+        event.visitor.push(pendingEntry);
       }
       await event.save();
 

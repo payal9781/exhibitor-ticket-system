@@ -133,7 +133,8 @@ const createVisitor = asyncHandler(async (req, res) => {
     event.visitor.push({
       userId: visitor._id,
       qrCode,
-      registeredAt: new Date()
+      registeredAt: new Date(),
+      isVerified: true,
     });
 
     try {
@@ -450,7 +451,8 @@ const updateVisitor = asyncHandler(async (req, res) => {
     event.visitor.push({
       userId: visitor._id,
       qrCode,
-      registeredAt: new Date()
+      registeredAt: new Date(),
+      isVerified: true,
     });
 
     try {

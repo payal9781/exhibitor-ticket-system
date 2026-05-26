@@ -17,9 +17,11 @@ const {
   checkOutExhibitor,
   getExhibitorsWithAttendance
 } = require('../controllers/exhibitorController');
+const { importExhibitors } = require('../controllers/importController');
 
 
 router.post('/create', authMiddleware(['organizer', 'superAdmin']), createExhibitor);
+router.post('/import', authMiddleware(['organizer', 'superAdmin']), importExhibitors);
 router.post('/list', authMiddleware(['organizer', 'superAdmin']), getExhibitors);
 router.post('/get', authMiddleware(['organizer', 'superAdmin']), getExhibitorById);
 router.post('/update', authMiddleware(['organizer', 'superAdmin']), updateExhibitor);
