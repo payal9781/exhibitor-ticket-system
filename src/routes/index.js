@@ -21,5 +21,6 @@ router.use('/chat', require('./chatRoutes'));
 // Mobile App APIs
 router.use('/exhibitor-mobile', require('./exhibitorMobileRoutes'));
 router.use('/visitor-mobile', require('./visitorMobileRoutes'));
+router.use('/room-referrals', require('./roomReferralRoutes'));
 
 module.exports = router;

@@ -15,6 +15,9 @@ const models = {
   OtpSettings: require('./OtpSettings'),
   AdminNotificationLog: require('./AdminNotificationLog'),
   Notification: require('./notification'),
+  RoomReferralRoom: require('./RoomReferralRoom'),
+  RoomReferralRound: require('./RoomReferralRound'),
+  RoomReferralEntry: require('./RoomReferralEntry'),
 };
 
 module.exports = { models };
