@@ -37,6 +37,7 @@ const { getSponsors } = require('../controllers/eventController');
 // Import category functionality from category controller
 const { getCategories } = require('../controllers/categoryController');
 const { getNotifications, markNotificationAsRead, getUserDetails, followUser, unfollowUser, getFollowers, getFollowing } = require('../controllers/mobileController');
+const { listIndustrySectorsForMobile } = require('../controllers/industrySectorController');
 
 // Mobile app routes for exhibitors and visitors
 
@@ -51,6 +52,9 @@ router.post('/my-registered-events', authMiddleware(['exhibitor', 'visitor']), g
 router.post('/attended-events', authMiddleware(['exhibitor', 'visitor']), getAttendedEvents);
 router.post('/record-scan', authMiddleware(['exhibitor', 'visitor']), recordScan);
 router.post('/scan-statistics', authMiddleware(['exhibitor', 'visitor']), getScanStatistics);
+
+// Industry sectors (for profile selection)
+router.post('/industry-sectors/list', authMiddleware(['exhibitor', 'visitor']), listIndustrySectorsForMobile);
 
 // Profile management routes
 router.post('/my-profile', authMiddleware(['exhibitor', 'visitor']), getMyProfile);

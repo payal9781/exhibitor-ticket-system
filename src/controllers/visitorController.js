@@ -4,13 +4,21 @@ const Visitor = require('../models/Visitor');
 const Event = require('../models/Event');
 const Organizer = require('../models/Organizer');
 const Exhibitor = require('../models/Exhibitor');
+const axios = require('axios');
 const UserEventSlot = require('../models/UserEventSlot');
 const Meeting = require('../models/z-index').models.Meeting;
 const generateSlots = require('../utils/slotGenerator');
 const { buildAddedByFromRequest } = require('../utils/addedByHelper');
+const {
+  parseIndustrySectorInput,
+  validateIndustrySectorIds,
+  applyIndustrySectorsToUser,
+  profileIndustrySectorSelect,
+} = require('../utils/industrySectorHelper');
 
 const createVisitor = asyncHandler(async (req, res) => {
   const { eventId, ...visitorData } = req.body;
+  const industrySectorInput = parseIndustrySectorInput(req.body);
   
   // Log for debugging - remove eventId from logs if it's not set
   console.log('Create visitor request:', {
@@ -53,6 +61,14 @@ const createVisitor = asyncHandler(async (req, res) => {
     ...visitorData,
     isActive: true
   });
+
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return errorResponse(res, validation.error, 400);
+    }
+    await applyIndustrySectorsToUser(visitor, validation.sectorIds, validation.sectors);
+  }
 
   // Create digital card profile
   try {
@@ -377,6 +393,7 @@ const getVisitorById = asyncHandler(async (req, res) => {
 
 const updateVisitor = asyncHandler(async (req, res) => {
   const { id, eventId, ...updateData } = req.body; // Extract eventId separately
+  const industrySectorInput = parseIndustrySectorInput(req.body);
   const visitor = await Visitor.findById(id);
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
 
@@ -388,9 +405,22 @@ const updateVisitor = asyncHandler(async (req, res) => {
     }
   }
 
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return errorResponse(res, validation.error, 400);
+    }
+    await applyIndustrySectorsToUser(visitor, validation.sectorIds, validation.sectors);
+  }
+
   // Update visitor data (excluding eventId)
   Object.keys(updateData).forEach(key => {
-    if (updateData[key] !== undefined && key !== 'keyWords') {
+    if (
+      updateData[key] !== undefined &&
+      key !== 'keyWords' &&
+      key !== 'industrySectors' &&
+      key !== 'industrySectorIds'
+    ) {
       visitor[key] = updateData[key];
     }
   });
@@ -639,15 +669,18 @@ const bulkCheckIn = asyncHandler(async (req, res) => {
 
 // Get visitor profile (for mobile app)
 const getMyProfile = asyncHandler(async (req, res) => {
-  const visitor = await Visitor.findById(req.user._id).select('-password');
+  const visitor = await Visitor.findById(req.user._id)
+    .select('-password')
+    .populate('industrySectors', profileIndustrySectorSelect);
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
   successResponse(res, visitor);
 });
 
 // Update visitor profile (for mobile app)
 const updateMyProfile = asyncHandler(async (req, res) => {
-  const { name, email, phone, bio, Sector, location, companyName } = req.body;
-  
+  const { name, email, phone, bio, Sector, location, companyName, keyWords, address, socialMediaLinks, website } = req.body;
+  const industrySectorInput = parseIndustrySectorInput(req.body);
+
   const visitor = await Visitor.findById(req.user._id);
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
 
@@ -662,18 +695,33 @@ const updateMyProfile = asyncHandler(async (req, res) => {
     if (existingPhone) return errorResponse(res, 'Phone number already exists', 400);
   }
 
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return errorResponse(res, validation.error, 400);
+    }
+    await applyIndustrySectorsToUser(visitor, validation.sectorIds, validation.sectors);
+  } else if (Sector !== undefined) {
+    visitor.Sector = Sector;
+  }
+
   // Update fields
-  if (name) visitor.name = name;
-  if (email) visitor.email = email;
-  if (phone) visitor.phone = phone;
-  if (bio) visitor.bio = bio;
-  if (Sector) visitor.Sector = Sector;
-  if (location) visitor.location = location;
-  if (companyName) visitor.companyName = companyName;
+  if (name !== undefined) visitor.name = name;
+  if (email !== undefined) visitor.email = email;
+  if (phone !== undefined) visitor.phone = phone;
+  if (bio !== undefined) visitor.bio = bio;
+  if (location !== undefined) visitor.location = location;
+  if (companyName !== undefined) visitor.companyName = companyName;
+  if (keyWords !== undefined) visitor.keyWords = keyWords;
+  if (address !== undefined) visitor.address = address;
+  if (socialMediaLinks !== undefined) visitor.socialMediaLinks = socialMediaLinks;
+  if (website !== undefined) visitor.website = website;
 
   await visitor.save();
-  
-  const updatedVisitor = await Visitor.findById(req.user._id).select('-password');
+
+  const updatedVisitor = await Visitor.findById(req.user._id)
+    .select('-password')
+    .populate('industrySectors', profileIndustrySectorSelect);
   successResponse(res, updatedVisitor);
 });
 

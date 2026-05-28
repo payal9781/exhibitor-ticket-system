@@ -10,9 +10,16 @@ const Meeting = require('../models/z-index').models.Meeting;
 const mongoose = require('mongoose');
 const generateSlots = require('../utils/slotGenerator');
 const { buildAddedByFromRequest } = require('../utils/addedByHelper');
+const {
+  parseIndustrySectorInput,
+  validateIndustrySectorIds,
+  applyIndustrySectorsToUser,
+  profileIndustrySectorSelect,
+} = require('../utils/industrySectorHelper');
 
 const createExhibitor = asyncHandler(async (req, res) => {
   const { eventId, ...exhibitorData } = req.body;
+  const industrySectorInput = parseIndustrySectorInput(req.body);
   
   // Log for debugging
   console.log('Create exhibitor request:', {
@@ -81,6 +88,14 @@ const createExhibitor = asyncHandler(async (req, res) => {
     ...exhibitorData,
     isActive: true
   });
+
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return errorResponse(res, validation.error, 400);
+    }
+    await applyIndustrySectorsToUser(exhibitor, validation.sectorIds, validation.sectors);
+  }
 
     try {
       const payload = {
@@ -383,6 +398,7 @@ const getExhibitorById = asyncHandler(async (req, res) => {
 });
 const updateExhibitor = asyncHandler(async (req, res) => {
   const { id, eventId, ...updateData } = req.body; // Extract eventId separately
+  const industrySectorInput = parseIndustrySectorInput(req.body);
   const exhibitor = await Exhibitor.findById(id);
   if (!exhibitor) return errorResponse(res, 'Exhibitor not found', 404);
 
@@ -418,9 +434,22 @@ const updateExhibitor = asyncHandler(async (req, res) => {
     }
   }
 
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return errorResponse(res, validation.error, 400);
+    }
+    await applyIndustrySectorsToUser(exhibitor, validation.sectorIds, validation.sectors);
+  }
+
   // Update exhibitor data (excluding eventId)
   Object.keys(updateData).forEach(key => {
-    if (updateData[key] !== undefined && key !== 'keyWords') {
+    if (
+      updateData[key] !== undefined &&
+      key !== 'keyWords' &&
+      key !== 'industrySectors' &&
+      key !== 'industrySectorIds'
+    ) {
       exhibitor[key] = updateData[key];
     }
   });
@@ -688,7 +717,9 @@ const checkOutExhibitor = asyncHandler(async (req, res) => {
 
 // Get exhibitor profile (for mobile app)
 const getMyProfile = asyncHandler(async (req, res) => {
-  const exhibitor = await Exhibitor.findById(req.user._id).select('-password');
+  const exhibitor = await Exhibitor.findById(req.user._id)
+    .select('-password')
+    .populate('industrySectors', profileIndustrySectorSelect);
   if (!exhibitor) {
     return successResponse(res, { message: 'Exhibitor not found', data: 0 });
   }
@@ -700,7 +731,8 @@ const getMyProfile = asyncHandler(async (req, res) => {
 
 // Update exhibitor profile (for mobile app)
 const updateMyProfile = asyncHandler(async (req, res) => {
-  const { companyName, email, phone, bio, Sector, location, website } = req.body;
+  const { companyName, email, phone, bio, Sector, location, website, keyWords, address, socialMediaLinks } = req.body;
+  const industrySectorInput = parseIndustrySectorInput(req.body);
 
   const exhibitor = await Exhibitor.findById(req.user._id);
   if (!exhibitor) {
@@ -722,18 +754,32 @@ const updateMyProfile = asyncHandler(async (req, res) => {
     }
   }
 
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return errorResponse(res, validation.error, 400);
+    }
+    await applyIndustrySectorsToUser(exhibitor, validation.sectorIds, validation.sectors);
+  } else if (Sector !== undefined) {
+    exhibitor.Sector = Sector;
+  }
+
   // Update fields
-  if (companyName) exhibitor.companyName = companyName;
-  if (email) exhibitor.email = email;
-  if (phone) exhibitor.phone = phone;
-  if (bio) exhibitor.bio = bio;
-  if (Sector) exhibitor.Sector = Sector;
-  if (location) exhibitor.location = location;
-  if (website) exhibitor.website = website;
+  if (companyName !== undefined) exhibitor.companyName = companyName;
+  if (email !== undefined) exhibitor.email = email;
+  if (phone !== undefined) exhibitor.phone = phone;
+  if (bio !== undefined) exhibitor.bio = bio;
+  if (location !== undefined) exhibitor.location = location;
+  if (website !== undefined) exhibitor.website = website;
+  if (keyWords !== undefined) exhibitor.keyWords = keyWords;
+  if (address !== undefined) exhibitor.address = address;
+  if (socialMediaLinks !== undefined) exhibitor.socialMediaLinks = socialMediaLinks;
 
   await exhibitor.save();
 
-  const updatedExhibitor = await Exhibitor.findById(req.user._id).select('-password');
+  const updatedExhibitor = await Exhibitor.findById(req.user._id)
+    .select('-password')
+    .populate('industrySectors', profileIndustrySectorSelect);
   successResponse(res, {
     message: 'Profile updated successfully',
     data: updatedExhibitor

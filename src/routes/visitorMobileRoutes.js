@@ -15,6 +15,10 @@ const {
 } = require('../controllers/visitorController');
 const constants = require('../config/constants');
 const upload = require('../config/multerConfig').upload;
+const { listIndustrySectorsForMobile } = require('../controllers/industrySectorController');
+
+// Industry sectors (for profile selection)
+router.post('/industry-sectors/list', authMiddleware(['visitor']), listIndustrySectorsForMobile);
 
 // Profile management
 router.post('/profile', authMiddleware(['visitor']), getMyProfile);

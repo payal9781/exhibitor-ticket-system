@@ -69,6 +69,34 @@ const getActiveSectors = asyncHandler(async (req, res) => {
   successResponse(res, { sectors });
 });
 
+/** Mobile app: list active industry sectors (exhibitor / visitor) */
+const listIndustrySectorsForMobile = asyncHandler(async (req, res) => {
+  await ensureDefaultSectors();
+
+  const { search } = req.body || {};
+  const query = { isDeleted: false, isActive: true };
+
+  if (search && String(search).trim()) {
+    const term = String(search).trim();
+    query.$or = [
+      { name: { $regex: term, $options: 'i' } },
+      { value: { $regex: term, $options: 'i' } },
+      { description: { $regex: term, $options: 'i' } },
+    ];
+  }
+
+  const sectors = await IndustrySector.find(query)
+    .sort({ name: 1 })
+    .select('name value description')
+    .lean();
+
+  successResponse(res, {
+    message: 'Industry sectors retrieved successfully',
+    sectors,
+    total: sectors.length,
+  });
+});
+
 const createSector = asyncHandler(async (req, res) => {
   const { name, value, description, isActive } = req.body;
 
@@ -163,6 +191,7 @@ const toggleSectorStatus = asyncHandler(async (req, res) => {
 module.exports = {
   listSectors,
   getActiveSectors,
+  listIndustrySectorsForMobile,
   createSector,
   updateSector,
   deleteSector,

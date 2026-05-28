@@ -3,7 +3,16 @@ const router = express.Router();
 const { register, login, loginApp, logout, sendOtp, verifyOtp, forgotPassword, verifyResetToken, resetPassword, getProfile, updateProfile, changePassword } = require('../controllers/authController');
 const authMiddleware = require('../middleware/authMiddleware.js');
 const validator = require('../utils/validator');
-const { register: registerValidator, login: loginValidator, loginApp: loginAppValidator, forgotPassword: forgotPasswordValidator, verifyResetToken: verifyResetTokenValidator, resetPassword: resetPasswordValidator } = require('../validators/authValidator');
+const {
+  register: registerValidator,
+  login: loginValidator,
+  loginApp: loginAppValidator,
+  forgotPassword: forgotPasswordValidator,
+  verifyResetToken: verifyResetTokenValidator,
+  resetPassword: resetPasswordValidator,
+  updateProfile: updateProfileValidator,
+  changePassword: changePasswordValidator,
+} = require('../validators/authValidator');
 
 router.post('/register', validator(registerValidator), register);
 router.post('/login', validator(loginValidator), login);
@@ -19,7 +28,7 @@ router.get('/reset-password/:token', verifyResetToken); // Alternative route for
 
 // Profile management routes
 router.post('/profile', authMiddleware(['organizer', 'superAdmin']), getProfile);
-router.post('/update-profile', authMiddleware(['organizer', 'superAdmin']), updateProfile);
-router.post('/change-password', authMiddleware(['organizer', 'superAdmin']), changePassword);
+router.post('/update-profile', authMiddleware(['organizer', 'superAdmin']), validator(updateProfileValidator), updateProfile);
+router.post('/change-password', authMiddleware(['organizer', 'superAdmin']), validator(changePasswordValidator), changePassword);
 
 module.exports = router;

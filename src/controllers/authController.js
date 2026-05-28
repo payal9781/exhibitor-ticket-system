@@ -408,87 +408,87 @@ const resetPassword = asyncHandler(async (req, res) => {
   successResponse(res, { message: 'Password has been reset successfully' });
 });
 
+const getAuthUserId = (req) => req.user?.id || req.user?._id;
+
+const getProfileAllowedFields = (role) => {
+  if (role === 'organizer') {
+    return ['name', 'phone', 'organizationName', 'company', 'designation'];
+  }
+  if (role === 'superAdmin') {
+    return ['name', 'phone', 'company', 'designation', 'address'];
+  }
+  return [];
+};
+
+const pickProfileUpdateData = (body, role) => {
+  const allowed = getProfileAllowedFields(role);
+  const updateData = {};
+  for (const key of allowed) {
+    if (body[key] !== undefined) {
+      updateData[key] = typeof body[key] === 'string' ? body[key].trim() : body[key];
+    }
+  }
+  return updateData;
+};
+
 // Get current user profile
 const getProfile = asyncHandler(async (req, res) => {
-  try {
-    const userRole = req.user.role || req.user.type;
-    const Model = getModelByRole(userRole);
+  const userRole = req.user.role || req.user.type;
+  const Model = getModelByRole(userRole);
+  const userId = getAuthUserId(req);
 
-    if (!Model) {
-      return errorResponse(res, 'Invalid user role', 400);
-    }
-
-    const user = await Model.findById(req.user._id).select('-password');
-    if (!user) {
-      return errorResponse(res, 'User not found', 404);
-    }
-
-    const userResponse = user.toObject();
-    userResponse.role = userRole;
-
-    successResponse(res, { user: userResponse, message: 'Profile retrieved successfully' });
-  } catch (error) {
-    console.error('Get profile error:', error);
-    errorResponse(res, 'Failed to retrieve profile', 500);
+  if (!Model || !userId) {
+    return errorResponse(res, 'Invalid user role', 400);
   }
+
+  const user = await Model.findById(userId).select('-password');
+  if (!user) {
+    return errorResponse(res, 'User not found', 404);
+  }
+
+  const userResponse = user.toObject();
+  userResponse.role = userRole;
+
+  successResponse(res, { user: userResponse, message: 'Profile retrieved successfully' });
 });
 
 // Update current user profile
 const updateProfile = asyncHandler(async (req, res) => {
+  const userRole = req.user.role || req.user.type;
+  const Model = getModelByRole(userRole);
+  const userId = getAuthUserId(req);
+
+  if (!Model || !userId) {
+    return errorResponse(res, 'Invalid user role', 400);
+  }
+
+  const updateData = pickProfileUpdateData(req.body, userRole);
+  if (Object.keys(updateData).length === 0) {
+    return errorResponse(res, 'No valid fields to update', 400);
+  }
+
+  const existingUser = await Model.findById(userId);
+  if (!existingUser) {
+    return errorResponse(res, 'User not found', 404);
+  }
+
   try {
-    console.log('🔥 Update Profile - Request user:', req.user);
-    console.log('🔥 Update Profile - Request body:', req.body);
-
-    const userRole = req.user.role || req.user.type;
-    console.log('🔥 Update Profile - Determined role:', userRole);
-
-    const Model = getModelByRole(userRole);
-    console.log('🔥 Update Profile - Model found:', !!Model);
-
-    if (!Model) {
-      console.error('🔥 Update Profile - Invalid user role:', userRole);
-      return errorResponse(res, `Invalid user role: ${userRole}`, 400);
-    }
-
-    const { password, ...updateData } = req.body; // Exclude password from profile update
-    console.log('🔥 Update Profile - Update data:', updateData);
-
-    // Check if user exists first
-    const existingUser = await Model.findById(req.user._id);
-    if (!existingUser) {
-      console.error('🔥 Update Profile - User not found:', req.user.id);
-      return errorResponse(res, 'User not found', 404);
-    }
-
-    console.log('🔥 Update Profile - Existing user found:', existingUser.email);
-
-    const user = await Model.findByIdAndUpdate(
-      req.user.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password');
+    const user = await Model.findByIdAndUpdate(userId, updateData, {
+      new: true,
+      runValidators: true,
+    }).select('-password');
 
     if (!user) {
-      console.error('🔥 Update Profile - Failed to update user');
       return errorResponse(res, 'Failed to update user', 500);
     }
 
-    console.log('🔥 Update Profile - User updated successfully');
     const userResponse = user.toObject();
     userResponse.role = userRole;
 
     successResponse(res, { user: userResponse, message: 'Profile updated successfully' });
   } catch (error) {
-    console.error('🔥 Update profile error details:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-      user: req.user,
-      body: req.body
-    });
-
     if (error.name === 'ValidationError') {
-      const validationErrors = Object.values(error.errors).map(err => err.message);
+      const validationErrors = Object.values(error.errors).map((err) => err.message);
       return errorResponse(res, `Validation error: ${validationErrors.join(', ')}`, 400);
     }
 
@@ -501,6 +501,7 @@ const updateProfile = asyncHandler(async (req, res) => {
       return errorResponse(res, `${field} already exists`, 400);
     }
 
+    console.error('Update profile error:', error);
     errorResponse(res, `Failed to update profile: ${error.message}`, 500);
   }
 });
@@ -525,7 +526,8 @@ const changePassword = asyncHandler(async (req, res) => {
       return errorResponse(res, 'Invalid user role', 400);
     }
 
-    const user = await Model.findById(req.user._id);
+    const userId = getAuthUserId(req);
+    const user = await Model.findById(userId);
     if (!user) {
       return errorResponse(res, 'User not found', 404);
     }

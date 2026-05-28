@@ -11,6 +11,13 @@ const Attendance = require('../models/z-index').models.Attendance;
 const fcmNotification = require('../utils/fcmToken_notification').sendNotification;
 const Notification = require('../models/notification');
 const Follow = require('../models/Follow');
+const {
+  parseIndustrySectorInput,
+  validateIndustrySectorIds,
+  applyIndustrySectorsToUser,
+  applyMobileProfileFields,
+  profileIndustrySectorSelect,
+} = require('../utils/industrySectorHelper');
 
 // Utility function to update ended events to isActive: false
 const updateEndedEventsStatus = async () => {
@@ -1284,9 +1291,13 @@ const getMyProfile = asyncHandler(async (req, res) => {
 
   let user;
   if (userType === 'exhibitor') {
-    user = await Exhibitor.findById(userId).select('-otp -otpExpires');
+    user = await Exhibitor.findById(userId)
+      .select('-otp -otpExpires')
+      .populate('industrySectors', profileIndustrySectorSelect);
   } else {
-    user = await Visitor.findById(userId).select('-otp -otpExpires');
+    user = await Visitor.findById(userId)
+      .select('-otp -otpExpires')
+      .populate('industrySectors', profileIndustrySectorSelect);
   }
 
   if (!user) {
@@ -1299,35 +1310,67 @@ const getMyProfile = asyncHandler(async (req, res) => {
   successResponse(res, userResponse);
 });
 
-// Update user's own profile
+// Update user's own profile (POST /mobile/update-profile)
 const updateMyProfile = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const userType = req.user.type;
-  const updateData = req.body;
-
-  // Remove sensitive fields that shouldn't be updated
-  delete updateData.otp;
-  delete updateData.otpExpires;
-  delete updateData.isActive;
-  delete updateData.isDeleted;
-  delete updateData._id;
-
-  if (req.file) {
-    updateData.profileImage = req.file.path; 
-  }
+  const body = req.body || {};
+  const industrySectorInput = parseIndustrySectorInput(body);
 
   let user;
   if (userType === 'exhibitor') {
-    user = await Exhibitor.findByIdAndUpdate(userId, updateData, { new: true }).select('-otp -otpExpires');
+    user = await Exhibitor.findById(userId);
   } else {
-    user = await Visitor.findByIdAndUpdate(userId, updateData, { new: true }).select('-otp -otpExpires');
+    user = await Visitor.findById(userId);
   }
 
   if (!user) {
     return errorResponse(res, 'User not found', 404);
   }
 
-  const userResponse = user.toObject();
+  const Model = userType === 'exhibitor' ? Exhibitor : Visitor;
+
+  if (body.email !== undefined && body.email !== user.email) {
+    const existingEmail = await Model.findOne({ email: body.email, _id: { $ne: userId } });
+    if (existingEmail) {
+      return errorResponse(res, 'Email already exists', 400);
+    }
+  }
+
+  if (body.phone !== undefined && body.phone !== user.phone) {
+    const existingPhone = await Model.findOne({ phone: body.phone, _id: { $ne: userId } });
+    if (existingPhone) {
+      return errorResponse(res, 'Phone number already exists', 400);
+    }
+  }
+
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return errorResponse(res, validation.error, 400);
+    }
+    await applyIndustrySectorsToUser(user, validation.sectorIds, validation.sectors);
+    delete body.Sector;
+  }
+
+  applyMobileProfileFields(user, body, userType);
+
+  if (req.file) {
+    user.profileImage = req.file.path;
+  }
+
+  await user.save();
+
+  const updatedUser =
+    userType === 'exhibitor'
+      ? await Exhibitor.findById(userId)
+          .select('-otp -otpExpires')
+          .populate('industrySectors', profileIndustrySectorSelect)
+      : await Visitor.findById(userId)
+          .select('-otp -otpExpires')
+          .populate('industrySectors', profileIndustrySectorSelect);
+
+  const userResponse = updatedUser.toObject();
   userResponse.userType = userType;
 
   successResponse(res, userResponse);
@@ -2170,9 +2213,13 @@ const updateProfileImage = asyncHandler(async (req, res) => {
 
   let updatedUser;
   if (userType === 'exhibitor') {
-    updatedUser = await Exhibitor.findById(userId).select('-otp -otpExpires');
+    updatedUser = await Exhibitor.findById(userId)
+      .select('-otp -otpExpires')
+      .populate('industrySectors', profileIndustrySectorSelect);
   } else {
-    updatedUser = await Visitor.findById(userId).select('-otp -otpExpires');
+    updatedUser = await Visitor.findById(userId)
+      .select('-otp -otpExpires')
+      .populate('industrySectors', profileIndustrySectorSelect);
   }
 
   const userResponse = updatedUser.toObject();

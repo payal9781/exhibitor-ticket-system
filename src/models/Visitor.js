@@ -10,6 +10,7 @@ const visitorSchema = new mongoose.Schema({
   coverImage: { type: String },
   bio: { type: String },
   Sector: { type: String },
+  industrySectors: [{ type: mongoose.Schema.Types.ObjectId, ref: 'IndustrySector' }],
   keyWords: [{ type: String }],
   website: { type: String },
   address:{

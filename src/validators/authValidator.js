@@ -44,4 +44,27 @@ const resetPassword = Joi.object({
   password: Joi.string().min(8).required(),
 });
 
-module.exports = { register, login, loginApp, forgotPassword, verifyResetToken, resetPassword };
+const updateProfile = Joi.object({
+  name: Joi.string().trim().min(1).max(120).optional(),
+  phone: Joi.string().trim().max(20).allow('', null).optional(),
+  organizationName: Joi.string().trim().max(200).allow('', null).optional(),
+  company: Joi.string().trim().max(200).allow('', null).optional(),
+  designation: Joi.string().trim().max(120).allow('', null).optional(),
+  address: Joi.string().trim().max(500).allow('', null).optional(),
+}).min(1);
+
+const changePassword = Joi.object({
+  currentPassword: Joi.string().required(),
+  newPassword: Joi.string().min(8).required(),
+});
+
+module.exports = {
+  register,
+  login,
+  loginApp,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword,
+  updateProfile,
+  changePassword,
+};

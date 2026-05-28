@@ -6,6 +6,11 @@ const Visitor = require('../models/Visitor');
 const Organizer = require('../models/Organizer');
 const Scan = require('../models/Scan');
 const Category = require('../models/Category');
+const {
+  buildDateFilter,
+  countPendingRegistrations,
+  getRunningAndRecentEvents,
+} = require('../utils/dashboardHelpers');
 
 // Helper function to calculate percentage change
 function calculatePercentageChange(current, previous) {
@@ -67,14 +72,7 @@ const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
   
   const matchingEventIds = matchingEvents.map(e => e._id);
   
-  // Date filter for specific metrics
-  const dateFilter = {};
-  if (startDate) dateFilter.$gte = new Date(startDate);
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    dateFilter.$lte = end;
-  }
+  const dateFilter = buildDateFilter(startDate, endDate);
 
   // 1. Total Events in period
   let eventPeriodQuery = { _id: { $in: matchingEventIds }, isDeleted: false };
@@ -85,23 +83,15 @@ const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfPreviousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const endOfPreviousMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-  
-  const startOfWeek = new Date();
-  startOfWeek.setDate(now.getDate() - 7);
-  const startOfPreviousWeek = new Date(startOfWeek);
-  startOfPreviousWeek.setDate(startOfWeek.getDate() - 7);
-  
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const startOfPreviousDay = new Date(startOfDay);
-  startOfPreviousDay.setDate(startOfDay.getDate() - 1);
 
-  // Fetch details for filtering registrations
-  const eventsWithDetails = await Event.find({ 
+  const eventsWithDetails = await Event.find({
     _id: { $in: matchingEventIds },
-    isDeleted: false 
-  }).populate('exhibitor.userId visitor.userId');
+    isDeleted: false,
+  })
+    .populate('exhibitor.userId visitor.userId')
+    .populate('organizerId', 'name organizationName')
+    .populate('createdByAdminId', 'name')
+    .lean();
   
   const uniqueExhibitors = new Set();
   const uniqueVisitors = new Set();
@@ -179,36 +169,56 @@ const getOrganizerDashboardStats = asyncHandler(async (req, res) => {
   const eventsThisMonth = await Event.countDocuments({ _id: { $in: matchingEventIds }, createdAt: { $gte: startOfMonth } });
   const eventsPrevMonth = await Event.countDocuments({ _id: { $in: matchingEventIds }, createdAt: { $gte: startOfPreviousMonth, $lt: startOfMonth } });
 
+  const pendingRegistrationRequests = countPendingRegistrations(eventsWithDetails);
+  const { runningEvents, recentEvents } = getRunningAndRecentEvents(eventsWithDetails);
+
   const stats = {
     totalEvents: {
       value: totalEvents,
       trend: formatTrendText(eventsThisMonth, eventsPrevMonth, 'month'),
       trendUp: eventsThisMonth >= eventsPrevMonth,
-      percentageChange: parseFloat(calculatePercentageChange(eventsThisMonth, eventsPrevMonth))
+      percentageChange: parseFloat(calculatePercentageChange(eventsThisMonth, eventsPrevMonth)),
+    },
+    totalExhibitors: {
+      value: totalExhibitorsCount,
+      trend: 'Registrations in selected period',
+      trendUp: true,
+    },
+    totalVisitors: {
+      value: totalVisitorsCount,
+      trend: 'Registrations in selected period',
+      trendUp: true,
     },
     activeExhibitors: {
       value: totalExhibitorsCount,
-      trend: 'In selected period',
-      trendUp: true
+      trend: 'Registrations in selected period',
+      trendUp: true,
     },
     registeredVisitors: {
       value: totalVisitorsCount,
-      trend: 'In selected period',
-      trendUp: true
+      trend: 'Registrations in selected period',
+      trendUp: true,
+    },
+    pendingRegistrationRequests: {
+      value: pendingRegistrationRequests,
+      trend: pendingRegistrationRequests > 0 ? 'Awaiting your review' : 'All caught up',
+      trendUp: pendingRegistrationRequests === 0,
     },
     engagement: {
       value: totalScans,
       trend: 'Total scans in period',
-      trendUp: true
+      trendUp: true,
     },
+    runningEvents,
+    recentEvents,
     insights: {
       sectorDistribution: sectorData,
       topEvents: topEvents,
       engagementOverview: {
         totalScans,
-        periodScans: totalScans
-      }
-    }
+        periodScans: totalScans,
+      },
+    },
   };
   
   successResponse(res, stats);
@@ -249,14 +259,7 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
 
   const matchingEventIds = matchingEvents.map(e => e._id);
   
-  // Date filter for specific metrics
-  const dateFilter = {};
-  if (startDate) dateFilter.$gte = new Date(startDate);
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    dateFilter.$lte = end;
-  }
+  const dateFilter = buildDateFilter(startDate, endDate);
 
   // 1. Total Events in period
   let eventPeriodQuery = { _id: { $in: matchingEventIds }, isDeleted: false };
@@ -268,12 +271,24 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
   if (Object.keys(dateFilter).length > 0) organizerPeriodQuery.createdAt = dateFilter;
   const totalOrganizers = await Organizer.countDocuments(organizerPeriodQuery);
 
-  // 3. Total Exhibitors/Visitors in period (from matching events)
+  // 3. Platform-wide exhibitor & visitor counts (date-filtered on account created)
+  let exhibitorPeriodQuery = { isDeleted: false };
+  let visitorPeriodQuery = { isDeleted: false };
+  if (Object.keys(dateFilter).length > 0) {
+    exhibitorPeriodQuery.createdAt = dateFilter;
+    visitorPeriodQuery.createdAt = dateFilter;
+  }
+  const totalExhibitorsPlatform = await Exhibitor.countDocuments(exhibitorPeriodQuery);
+  const totalVisitorsPlatform = await Visitor.countDocuments(visitorPeriodQuery);
+
   let uniqueExhibitors = new Set();
   let uniqueVisitors = new Set();
   
-  // Fetch all registrations for matching events to filter by date
-  const eventsWithDetails = await Event.find({ _id: { $in: matchingEventIds } }).populate('exhibitor.userId visitor.userId');
+  const eventsWithDetails = await Event.find({ _id: { $in: matchingEventIds }, isDeleted: false })
+    .populate('exhibitor.userId visitor.userId')
+    .populate('organizerId', 'name organizationName')
+    .populate('createdByAdminId', 'name')
+    .lean();
   
   const eventEngagement = [];
   
@@ -314,9 +329,11 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
     });
   }
 
-  const totalExhibitorsCount = uniqueExhibitors.size;
-  const totalVisitorsCount = uniqueVisitors.size;
+  const totalExhibitorsCount = totalExhibitorsPlatform;
+  const totalVisitorsCount = totalVisitorsPlatform;
   const activeUsers = totalExhibitorsCount + totalVisitorsCount + totalOrganizers;
+  const pendingRegistrationRequests = countPendingRegistrations(eventsWithDetails);
+  const { runningEvents, recentEvents } = getRunningAndRecentEvents(eventsWithDetails);
 
   // 4. Total Scans in period
   let scanQuery = { eventId: { $in: matchingEventIds } };
@@ -365,19 +382,26 @@ const getSuperAdminDashboardStats = asyncHandler(async (req, res) => {
     },
     totalExhibitors: {
       value: totalExhibitorsCount,
-      trend: 'From filtered events',
-      trendUp: true
+      trend: 'Platform exhibitors in period',
+      trendUp: true,
     },
     totalVisitors: {
       value: totalVisitorsCount,
-      trend: 'From filtered events',
-      trendUp: true
+      trend: 'Platform visitors in period',
+      trendUp: true,
+    },
+    pendingRegistrationRequests: {
+      value: pendingRegistrationRequests,
+      trend: pendingRegistrationRequests > 0 ? 'Awaiting approval' : 'All caught up',
+      trendUp: pendingRegistrationRequests === 0,
     },
     engagement: {
       value: totalScans,
       trend: 'Total platform scans',
-      trendUp: true
+      trendUp: true,
     },
+    runningEvents,
+    recentEvents,
     insights: {
       globalSectorTrends: sectorTrends.map(s => ({ name: s._id || 'Other', value: s.count })),
       topEvents: eventEngagement.sort((a, b) => b.total - a.total).slice(0, 5),
