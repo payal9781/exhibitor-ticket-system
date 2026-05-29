@@ -111,9 +111,29 @@ const listOtps = asyncHandler(async (req, res) => {
   });
 });
 
+const deleteOtp = asyncHandler(async (req, res) => {
+  const { id } = req.body;
+  if (!id) return errorResponse(res, 'OTP id is required', 400);
+
+  const deleted = await models.Otp.findByIdAndDelete(id);
+  if (!deleted) return errorResponse(res, 'OTP not found', 404);
+
+  successResponse(res, { message: 'OTP deleted successfully' });
+});
+
+const deleteAllOtps = asyncHandler(async (_req, res) => {
+  const result = await models.Otp.deleteMany({});
+  successResponse(res, {
+    message: 'All OTP records deleted successfully',
+    deletedCount: result.deletedCount || 0,
+  });
+});
+
 module.exports = {
   listOtps,
   getOtpSettings,
   updateOtpSettings,
   getOtpStats,
+  deleteOtp,
+  deleteAllOtps,
 };

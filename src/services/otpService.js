@@ -50,8 +50,6 @@ class OTPService {
                 $set: updates,
                 $setOnInsert: {
                     key: 'default',
-                    bypassOtpEnabled: true,
-                    bypassOtp: this.bypassOTP,
                 },
             },
             { new: true, upsert: true }

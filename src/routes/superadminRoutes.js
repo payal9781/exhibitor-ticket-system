@@ -5,6 +5,8 @@ const {
   getOtpSettings,
   updateOtpSettings,
   getOtpStats,
+  deleteOtp,
+  deleteAllOtps,
 } = require('../controllers/otpManagementController');
 const {
   previewRecipients,
@@ -22,6 +24,8 @@ router.post('/otp/list', authMiddleware(['superAdmin']), listOtps);
 router.get('/otp/settings', authMiddleware(['superAdmin']), getOtpSettings);
 router.post('/otp/settings', authMiddleware(['superAdmin']), updateOtpSettings);
 router.post('/otp/stats', authMiddleware(['superAdmin']), getOtpStats);
+router.post('/otp/delete', authMiddleware(['superAdmin']), deleteOtp);
+router.post('/otp/delete-all', authMiddleware(['superAdmin']), deleteAllOtps);
 
 router.post('/notifications/preview', authMiddleware(['superAdmin']), previewRecipients);
 router.post('/notifications/send', authMiddleware(['superAdmin']), sendNotification);

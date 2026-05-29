@@ -475,12 +475,21 @@ const getRecentActivity = asyncHandler(async (req, res) => {
         });
       }
     }
-    return events.map(event => ({
-      action: `Event "${event.title}" was ${event.createdAt.getTime() === event.updatedAt.getTime() ? 'created' : 'updated'}`,
-      time: getTimeAgo(event.updatedAt),
-      timestamp: event.updatedAt,
-      type: 'event'
-    }));
+    return events.map(event => {
+      const createdAt = normalizeDate(event.createdAt);
+      const updatedAt = normalizeDate(event.updatedAt) || createdAt || new Date(0);
+      const wasCreated =
+        createdAt && updatedAt
+          ? createdAt.getTime() === updatedAt.getTime()
+          : !!createdAt && !event.updatedAt;
+
+      return {
+        action: `Event "${event.title}" was ${wasCreated ? 'created' : 'updated'}`,
+        time: getTimeAgo(updatedAt),
+        timestamp: updatedAt,
+        type: 'event'
+      };
+    });
   };
 
   // Helper to fetch exhibitors/visitors/scans
@@ -592,8 +601,11 @@ const getRecentActivity = asyncHandler(async (req, res) => {
 
 // Helper function to calculate time ago
 function getTimeAgo(date) {
+  const normalizedDate = normalizeDate(date);
+  if (!normalizedDate) return 'just now';
+
   const now = new Date();
-  const diffInMs = now - date;
+  const diffInMs = now - normalizedDate;
   const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
   const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
   const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
@@ -605,6 +617,12 @@ function getTimeAgo(date) {
   } else {
     return `${diffInDays} days ago`;
   }
+}
+
+function normalizeDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 // Get organizer's attendee overview
