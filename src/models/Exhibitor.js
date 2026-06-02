@@ -12,10 +12,12 @@ const exhibitorSchema = new mongoose.Schema({
   industrySectors: [{ type: mongoose.Schema.Types.ObjectId, ref: 'IndustrySector' }],
   keyWords: [{ type: String }],
   website: { type: String },
-  address: { 
+  location: { type: String, default: '' },
+  address: {
     city: { type: String },
-    state: { type: String }
-   },
+    state: { type: String },
+    country: { type: String },
+  },
   socialMediaLinks: { type: Object },
   digitalProfile: { type: String, default: "" },
   isActive: { type: Boolean, default: true },

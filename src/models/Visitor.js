@@ -13,9 +13,11 @@ const visitorSchema = new mongoose.Schema({
   industrySectors: [{ type: mongoose.Schema.Types.ObjectId, ref: 'IndustrySector' }],
   keyWords: [{ type: String }],
   website: { type: String },
-  address:{
-    city:{type:String},
-    state:{type:String}
+  location: { type: String, default: '' },
+  address: {
+    city: { type: String },
+    state: { type: String },
+    country: { type: String },
   },
   socialMediaLinks: { type: Object },
   machineId: { type: String, default: '' },

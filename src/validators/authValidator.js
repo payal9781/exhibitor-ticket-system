@@ -50,7 +50,36 @@ const updateProfile = Joi.object({
   organizationName: Joi.string().trim().max(200).allow('', null).optional(),
   company: Joi.string().trim().max(200).allow('', null).optional(),
   designation: Joi.string().trim().max(120).allow('', null).optional(),
-  address: Joi.string().trim().max(500).allow('', null).optional(),
+  digitalProfile: Joi.string().trim().max(500).allow('', null).optional(),
+  address: Joi.alternatives().try(
+    Joi.string().trim().max(500).allow('', null),
+    Joi.object({
+      street: Joi.string().trim().max(200).allow('', null).optional(),
+      city: Joi.string().trim().max(120).allow('', null).optional(),
+      state: Joi.string().trim().max(120).allow('', null).optional(),
+      country: Joi.string().trim().max(120).allow('', null).optional(),
+      zipCode: Joi.string().trim().max(20).allow('', null).optional(),
+    })
+  ).optional(),
+  extraDetails: Joi.object({
+    website: Joi.string().trim().max(300).allow('', null).optional(),
+    description: Joi.string().trim().max(2000).allow('', null).optional(),
+    socialMedia: Joi.object({
+      linkedin: Joi.string().trim().max(300).allow('', null).optional(),
+      twitter: Joi.string().trim().max(300).allow('', null).optional(),
+      facebook: Joi.string().trim().max(300).allow('', null).optional(),
+      instagram: Joi.string().trim().max(300).allow('', null).optional(),
+    }).optional(),
+    businessInfo: Joi.object({
+      taxId: Joi.string().trim().max(120).allow('', null).optional(),
+      businessType: Joi.string().valid('corporation', 'llc', 'partnership', 'sole_proprietorship', 'nonprofit').allow('', null).optional(),
+      foundedYear: Joi.number().integer().min(1800).max(3000).allow(null).optional(),
+      employeeCount: Joi.string().trim().max(80).allow('', null).optional(),
+      industry: Joi.string().trim().max(120).allow('', null).optional(),
+    }).optional(),
+    notes: Joi.string().trim().max(2000).allow('', null).optional(),
+    tags: Joi.array().items(Joi.string().trim().max(80)).optional(),
+  }).optional(),
 }).min(1);
 
 const changePassword = Joi.object({

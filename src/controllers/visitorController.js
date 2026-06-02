@@ -346,6 +346,7 @@ const getVisitors = asyncHandler(async (req, res) => {
   total = await Visitor.countDocuments(query);
 
   visitors = await Visitor.find(query)
+    .populate('industrySectors', profileIndustrySectorSelect)
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit));
@@ -377,7 +378,10 @@ const getVisitors = asyncHandler(async (req, res) => {
 
 const getVisitorById = asyncHandler(async (req, res) => {
   const { id } = req.body;
-  const visitor = await Visitor.findById(id);
+  const visitor = await Visitor.findById(id).populate(
+    'industrySectors',
+    profileIndustrySectorSelect
+  );
   if (!visitor) return errorResponse(res, 'Visitor not found', 404);
   
   const registeredEvents = await Event.find({

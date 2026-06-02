@@ -93,6 +93,23 @@ const applyIndustrySectorsToUser = async (user, sectorIds, sectors) => {
 
 const profileIndustrySectorSelect = 'name value description isActive';
 
+const formatIndustryLabelFromUser = (user) => {
+  if (user?.industrySectors?.length) {
+    const names = user.industrySectors
+      .map((sector) =>
+        sector && typeof sector === 'object' ? sector.name || sector.value : null
+      )
+      .filter(Boolean);
+    if (names.length) return names.join(', ');
+  }
+  return user?.Sector || '';
+};
+
+const getIndustrySectorIdsFromUser = (user) => {
+  if (!user?.industrySectors?.length) return [];
+  return user.industrySectors.map((sector) => String(sector._id || sector));
+};
+
 const parseJsonBodyField = (value) => {
   if (value === undefined || value === null || value === '') return undefined;
   if (typeof value === 'object') return value;
@@ -166,6 +183,8 @@ module.exports = {
   applyIndustrySectorsToUser,
   applyMobileProfileFields,
   profileIndustrySectorSelect,
+  formatIndustryLabelFromUser,
+  getIndustrySectorIdsFromUser,
   EXHIBITOR_PROFILE_FIELDS,
   VISITOR_PROFILE_FIELDS,
 };

@@ -12,6 +12,17 @@ const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'];
 const isSuperAdmin = (user) =>
   user?.type === 'superAdmin' || user?.type === 'superadmin';
 
+const normalizeId = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') {
+    const id = value._id ?? value.id;
+    return id ? String(id) : null;
+  }
+  return String(value);
+};
+
+const getAuthUserId = (user) => normalizeId(user?.id ?? user?._id);
+
 /** Resolve status for legacy records without approvalStatus */
 const resolveApprovalStatus = (participant) => {
   if (participant.approvalStatus && APPROVAL_STATUSES.includes(participant.approvalStatus)) {
@@ -22,10 +33,17 @@ const resolveApprovalStatus = (participant) => {
   return 'pending';
 };
 
-const canManageEvent = (user, event) =>
-  isSuperAdmin(user) ||
-  event.organizerId?.toString() === user?.id?.toString() ||
-  event.createdByAdminId?.toString() === user?.id?.toString();
+const canManageEvent = (user, event) => {
+  if (isSuperAdmin(user)) return true;
+
+  const userId = getAuthUserId(user);
+  if (!userId) return false;
+
+  const organizerId = normalizeId(event?.organizerId);
+  const adminCreatorId = normalizeId(event?.createdByAdminId);
+
+  return organizerId === userId || adminCreatorId === userId;
+};
 
 const formatDate = (date) => {
   if (!date) return '—';
@@ -214,7 +232,11 @@ const listRegistrationsByStatus = async (user, status, { eventId, userType, page
   const eventQuery = { isDeleted: false };
   if (eventId) eventQuery._id = eventId;
   if (!isSuperAdmin(user)) {
-    eventQuery.$or = [{ organizerId: user.id }, { createdByAdminId: user.id }];
+    const userId = getAuthUserId(user);
+    if (!userId) {
+      throw Object.assign(new Error('Invalid user session'), { status: 401 });
+    }
+    eventQuery.$or = [{ organizerId: userId }, { createdByAdminId: userId }];
   }
 
   const events = await Event.find(eventQuery)

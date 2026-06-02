@@ -198,9 +198,15 @@ const deleteOrganizer = asyncHandler(async (req, res) => {
 });
 
 const getOrganizers = asyncHandler(async (req, res) => {
-  const { search, page = 1, limit = 10 } = req.body;
+  const { search, page = 1, limit = 10, status } = req.body;
   
   let query = { isDeleted: false };
+
+  if (status === 'active') {
+    query.isActive = true;
+  } else if (status === 'inactive') {
+    query.isActive = false;
+  }
   
   if (search && search.trim()) {
     query.$or = [

@@ -11,6 +11,85 @@ const {
   isEventRegistrationClosed,
   requiresRegistrationApproval,
 } = require('../utils/eventDateUtils');
+const {
+  parseIndustrySectorInput,
+  validateIndustrySectorIds,
+  applyIndustrySectorsToUser,
+} = require('../utils/industrySectorHelper');
+
+const REGISTRATION_PROFILE_KEYS = new Set([
+  'name',
+  'email',
+  'phone',
+  'companyName',
+  'bio',
+  'website',
+  'location',
+  'profileImage',
+  'coverImage',
+  'socialMediaLinks',
+  'keyWords',
+  'address',
+  'Sector',
+]);
+
+const applyRegistrationProfile = async (user, body) => {
+  const industrySectorInput = parseIndustrySectorInput(body);
+
+  Object.keys(body).forEach((key) => {
+    if (
+      !REGISTRATION_PROFILE_KEYS.has(key) ||
+      body[key] === undefined ||
+      body[key] === '' ||
+      key === 'keyWords'
+    ) {
+      return;
+    }
+    user[key] = body[key];
+  });
+
+  if (body.keyWords !== undefined) {
+    user.keyWords = Array.isArray(body.keyWords)
+      ? body.keyWords
+      : String(body.keyWords)
+          .split(',')
+          .map((k) => k.trim())
+          .filter(Boolean);
+  }
+
+  if (industrySectorInput !== undefined) {
+    const validation = await validateIndustrySectorIds(industrySectorInput);
+    if (!validation.valid) {
+      return { error: validation.error };
+    }
+    await applyIndustrySectorsToUser(user, validation.sectorIds, validation.sectors);
+  } else if (body.Sector) {
+    user.Sector = body.Sector;
+  }
+
+  if (body.location !== undefined && body.location !== '') {
+    user.location = body.location;
+    if (!user.address || typeof user.address !== 'object') {
+      user.address = {};
+    }
+    user.address.city = body.location;
+    user.markModified?.('address');
+  }
+
+  if (body.address !== undefined && body.address !== null && typeof body.address === 'object') {
+    if (!user.address || typeof user.address !== 'object') {
+      user.address = {};
+    }
+    Object.assign(user.address, body.address);
+    user.markModified?.('address');
+    const cityCountry = [user.address.city, user.address.country].filter(Boolean).join(', ');
+    if (cityCountry && !user.location) {
+      user.location = cityCountry;
+    }
+  }
+
+  return { error: null };
+};
 
 // Get event registration details by registration link
 const getEventByRegistrationLink = asyncHandler(async (req, res) => {
@@ -104,17 +183,23 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   }
 
   if (exhibitor) {
-    Object.keys(exhibitorData).forEach(key => {
-      if (exhibitorData[key] && exhibitorData[key] !== '') {
-        exhibitor[key] = exhibitorData[key];
-      }
-    });
+    const profileResult = await applyRegistrationProfile(exhibitor, exhibitorData);
+    if (profileResult.error) {
+      return errorResponse(res, profileResult.error, 400);
+    }
     await exhibitor.save();
   } else {
     exhibitor = new Exhibitor({
-      ...exhibitorData,
-      isActive: true
+      name: exhibitorData.name,
+      email: exhibitorData.email,
+      phone: exhibitorData.phone,
+      companyName: exhibitorData.companyName,
+      isActive: true,
     });
+    const profileResult = await applyRegistrationProfile(exhibitor, exhibitorData);
+    if (profileResult.error) {
+      return errorResponse(res, profileResult.error, 400);
+    }
 
     try {
       const payload = {
@@ -279,13 +364,9 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   }
 
   if (visitor) {
-    Object.keys(visitorData).forEach(key => {
-      if (visitorData[key] && visitorData[key] !== '' && key !== 'keyWords') {
-        visitor[key] = visitorData[key];
-      }
-    });
-    if (visitorData.keyWords) {
-      visitor.keyWords = visitorData.keyWords;
+    const profileResult = await applyRegistrationProfile(visitor, visitorData);
+    if (profileResult.error) {
+      return errorResponse(res, profileResult.error, 400);
     }
   } else {
     if (visitorData.email) {
@@ -298,9 +379,17 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
       }
     }
     visitor = new Visitor({
-      ...visitorData,
-      isActive: true
+      name: visitorData.name,
+      email: visitorData.email,
+      phone: visitorData.phone,
+      companyName: visitorData.companyName,
+      isActive: true,
     });
+
+    const profileResult = await applyRegistrationProfile(visitor, visitorData);
+    if (profileResult.error) {
+      return errorResponse(res, profileResult.error, 400);
+    }
 
     try {
       const payload = {

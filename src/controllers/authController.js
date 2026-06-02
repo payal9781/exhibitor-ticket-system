@@ -412,7 +412,16 @@ const getAuthUserId = (req) => req.user?.id || req.user?._id;
 
 const getProfileAllowedFields = (role) => {
   if (role === 'organizer') {
-    return ['name', 'phone', 'organizationName', 'company', 'designation'];
+    return [
+      'name',
+      'phone',
+      'organizationName',
+      'company',
+      'designation',
+      'digitalProfile',
+      'address',
+      'extraDetails',
+    ];
   }
   if (role === 'superAdmin') {
     return ['name', 'phone', 'company', 'designation', 'address'];
@@ -420,12 +429,29 @@ const getProfileAllowedFields = (role) => {
   return [];
 };
 
+const normalizeProfileValue = (value) => {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeProfileValue);
+  }
+  if (value && typeof value === 'object') {
+    const normalized = {};
+    Object.keys(value).forEach((key) => {
+      normalized[key] = normalizeProfileValue(value[key]);
+    });
+    return normalized;
+  }
+  return value;
+};
+
 const pickProfileUpdateData = (body, role) => {
   const allowed = getProfileAllowedFields(role);
   const updateData = {};
   for (const key of allowed) {
     if (body[key] !== undefined) {
-      updateData[key] = typeof body[key] === 'string' ? body[key].trim() : body[key];
+      updateData[key] = normalizeProfileValue(body[key]);
     }
   }
   return updateData;

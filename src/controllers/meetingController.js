@@ -2,6 +2,31 @@ const { successResponse, errorResponse } = require('../utils/apiResponse');
 const asyncHandler = require('express-async-handler');
 const UserEventSlot = require('../models/UserEventSlot');
 const Meeting = require("../models/meeting");
+const { profileIndustrySectorSelect } = require('../utils/industrySectorHelper');
+const { shouldShowInEventBookings } = require('../utils/participantApproval');
+
+const formatIndustryLabel = (user) => {
+  if (user?.industrySectors?.length) {
+    const names = user.industrySectors
+      .map((sector) => (sector && typeof sector === 'object' ? sector.name || sector.value : null))
+      .filter(Boolean);
+    if (names.length) return names.join(', ');
+  }
+  return user?.Sector || '';
+};
+
+const formatLocationLabel = (user) => {
+  const location = user?.location?.trim();
+  if (location) return location;
+  const parts = [user?.address?.city, user?.address?.state, user?.address?.country].filter(Boolean);
+  return parts.length ? parts.join(', ') : '';
+};
+
+const participantPopulateOptions = (path) => ({
+  path,
+  select: 'name companyName email phone profileImage bio Sector location address industrySectors',
+  populate: { path: 'industrySectors', select: profileIndustrySectorSelect },
+});
 
 const toggleShowSlots = asyncHandler(async (req, res) => {
   const { eventId, show } = req.body;
@@ -458,10 +483,10 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
   // Registered participants (populated)
   const [regExhibitors, regVisitors] = await Promise.all([
     Event.findById(eventId)
-      .populate('exhibitor.userId', 'companyName email phone profileImage Sector')
+      .populate(participantPopulateOptions('exhibitor.userId'))
       .select('exhibitor'),
     Event.findById(eventId)
-      .populate('visitor.userId', 'name companyName email phone profileImage Sector')
+      .populate(participantPopulateOptions('visitor.userId'))
       .select('visitor'),
   ]);
 
@@ -506,9 +531,14 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
     return 'not-marked';
   }
 
+  const approvedExhibitors = (regExhibitors?.exhibitor || []).filter(shouldShowInEventBookings);
+  const approvedVisitors = (regVisitors?.visitor || []).filter(shouldShowInEventBookings);
+
   // ── process exhibitors ──────────────────────────────────────────────────
-  const exhibitorsWithSlots = await Promise.all(
-    (regExhibitors?.exhibitor || []).map(async (ex) => {
+  const exhibitorsWithSlots = (await Promise.all(
+    approvedExhibitors.map(async (ex) => {
+      if (!ex.userId || typeof ex.userId !== 'object') return null;
+
       const userId   = ex.userId._id || ex.userId;
       const userSlot = userSlots.find(
         s => s.userId.toString() === userId.toString() && s.userType === 'exhibitor'
@@ -527,7 +557,9 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
         email:        ex.userId.email,
         phone:        ex.userId.phone,
         profileImage: ex.userId.profileImage,
-        Sector:       ex.userId.Sector,
+        bio:          ex.userId.bio || '',
+        Sector:       formatIndustryLabel(ex.userId),
+        location:     formatLocationLabel(ex.userId),
         type:         'exhibitor',
         registeredAt: ex.registeredAt,
         isVerified:   ex.isVerified,
@@ -541,11 +573,13 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
           : { name: 'Self-Registered', userType: 'Self', addedAt: ex.registeredAt },
       };
     })
-  );
+  )).filter(Boolean);
 
   // ── process visitors ────────────────────────────────────────────────────
-  const visitorsWithSlots = await Promise.all(
-    (regVisitors?.visitor || []).map(async (vis) => {
+  const visitorsWithSlots = (await Promise.all(
+    approvedVisitors.map(async (vis) => {
+      if (!vis.userId || typeof vis.userId !== 'object') return null;
+
       const userId   = vis.userId._id || vis.userId;
       const userSlot = userSlots.find(
         s => s.userId.toString() === userId.toString() && s.userType === 'visitor'
@@ -561,10 +595,13 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
       return {
         _id:          userId,
         name:         vis.userId.name || vis.userId.companyName || 'Unknown',
+        companyName:  vis.userId.companyName || '',
         email:        vis.userId.email,
         phone:        vis.userId.phone,
         profileImage: vis.userId.profileImage,
-        Sector:       vis.userId.Sector,
+        bio:          vis.userId.bio || '',
+        Sector:       formatIndustryLabel(vis.userId),
+        location:     formatLocationLabel(vis.userId),
         type:         'visitor',
         registeredAt: vis.registeredAt,
         isVerified:   vis.isVerified,
@@ -578,7 +615,7 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
           : { name: 'Self-Registered', userType: 'Self', addedAt: vis.registeredAt },
       };
     })
-  );
+  )).filter(Boolean);
 
   // ── exhibitor-to-exhibitor meetings (special list) ──────────────────────
   const exhibitorToExhibitorMeetings = await Promise.all(

@@ -15,6 +15,12 @@ const fs = require('fs/promises');
 const {v4:uuidv4} = require('uuid');
 const approvalService = require('../services/approvalService');
 const Organizer = require('../models/Organizer');
+const { shouldShowInEventBookings } = require('../utils/participantApproval');
+const {
+  profileIndustrySectorSelect,
+  formatIndustryLabelFromUser,
+  getIndustrySectorIdsFromUser,
+} = require('../utils/industrySectorHelper');
 
 const isSuperAdminUser = (user) =>
   user?.type === 'superAdmin' || user?.type === 'superadmin';
@@ -535,17 +541,51 @@ const registerForEvent = asyncHandler(async (req, res) => {
   const qrCode = qrResult.qrCode;
 
   let isNewRegistration = false;
+  const isStaffRegistration = ['organizer', 'superAdmin'].includes(req.user.type);
+
+  let staffAddedBy = null;
+  if (isStaffRegistration) {
+    let staffName = req.user.type === 'organizer' ? 'Organizer' : 'Superadmin';
+    try {
+      if (req.user.type === 'organizer') {
+        const Organizer = require('../models/Organizer');
+        const organizer = await Organizer.findById(req.user.id).select('name organizationName');
+        staffName = organizer?.name || organizer?.organizationName || staffName;
+      } else {
+        const Superadmin = require('../models/Superadmin');
+        const superadmin = await Superadmin.findById(req.user.id).select('name');
+        staffName = superadmin?.name || staffName;
+      }
+    } catch (error) {
+      console.error('Error fetching staff name:', error);
+    }
+    staffAddedBy = {
+      userId: req.user.id,
+      userType: req.user.type === 'organizer' ? 'Organizer' : 'Superadmin',
+      name: staffName,
+      addedAt: new Date(),
+    };
+  }
+
+  const registrationEntry = {
+    userId,
+    qrCode,
+    registeredAt: new Date(),
+    isVerified: isStaffRegistration,
+    approvalStatus: isStaffRegistration ? 'approved' : 'pending',
+    ...(staffAddedBy && { addedBy: staffAddedBy }),
+  };
 
   if (userType === 'exhibitor') {
     const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === userId);
     if (!existingExhibitor) {
-      event.exhibitor.push({ userId, qrCode });
+      event.exhibitor.push(registrationEntry);
       isNewRegistration = true;
     }
   } else if (userType === 'visitor') {
     const existingVisitor = event.visitor.find(vis => vis.userId.toString() === userId);
     if (!existingVisitor) {
-      event.visitor.push({ userId, qrCode });
+      event.visitor.push(registrationEntry);
       isNewRegistration = true;
     }
   } else {
@@ -655,6 +695,7 @@ const registerByLink = asyncHandler(async (req, res) => {
       qrCode,
       registeredAt: new Date(),
       isVerified: false,
+      approvalStatus: 'pending',
       addedBy: {
         userId: participant._id,
         userType: type === 'exhibitor' ? 'Exhibitor' : 'Visitor',
@@ -1009,17 +1050,16 @@ const getEventParticipants = asyncHandler(async (req, res) => {
   }
 
   // Fetch event with populated exhibitor and visitor data
+  const eventParticipantPopulate = {
+    select:
+      'companyName name email phone profileImage bio Sector location industrySectors isActive isDeleted',
+    match: { isActive: true, isDeleted: { $ne: true } },
+    populate: { path: 'industrySectors', select: profileIndustrySectorSelect },
+  };
+
   const event = await Event.findById(eventId)
-    .populate({
-      path: 'exhibitor.userId',
-      select: 'companyName email phone profileImage bio Sector location isActive isDeleted',
-      match: { isActive: true, isDeleted: { $ne: true } } // Only include active, non-deleted users
-    })
-    .populate({
-      path: 'visitor.userId',
-      select: 'name email phone profileImage bio Sector location companyName isActive isDeleted',
-      match: { isActive: true, isDeleted: { $ne: true } }
-    });
+    .populate({ path: 'exhibitor.userId', ...eventParticipantPopulate })
+    .populate({ path: 'visitor.userId', ...eventParticipantPopulate });
 
   if (!event) {
     return errorResponse(res, 'Event not found', 404);
@@ -1031,24 +1071,25 @@ const getEventParticipants = asyncHandler(async (req, res) => {
 
   // Ensure exhibitors and visitors are arrays and filter out null userId entries
   const exhibitors = (event.exhibitor || [])
-    .filter(ex => ex.userId && ex.isVerified) // Exclude entries with null userId
-    .map(ex => ({
+    .filter((ex) => ex.userId && shouldShowInEventBookings(ex))
+    .map((ex) => ({
       _id: ex.userId._id.toString(),
       companyName: ex.userId.companyName,
       email: ex.userId.email,
       phone: ex.userId.phone,
       profileImage: ex.userId.profileImage,
       bio: ex.userId.bio,
-      Sector: ex.userId.Sector,
+      Sector: formatIndustryLabelFromUser(ex.userId),
+      industrySectorIds: getIndustrySectorIdsFromUser(ex.userId),
       location: ex.userId.location,
       registeredAt: ex.registeredAt,
       qrCode: ex.qrCode,
-      userType: 'exhibitor'
+      userType: 'exhibitor',
     }));
 
   const visitors = (event.visitor || [])
-    .filter(vis => vis.userId && vis.isVerified) // Exclude entries with null userId
-    .map(vis => ({
+    .filter((vis) => vis.userId && shouldShowInEventBookings(vis))
+    .map((vis) => ({
       _id: vis.userId._id.toString(),
       name: vis.userId.name,
       companyName: vis.userId.companyName,
@@ -1056,11 +1097,12 @@ const getEventParticipants = asyncHandler(async (req, res) => {
       phone: vis.userId.phone,
       profileImage: vis.userId.profileImage,
       bio: vis.userId.bio,
-      Sector: vis.userId.Sector,
+      Sector: formatIndustryLabelFromUser(vis.userId),
+      industrySectorIds: getIndustrySectorIdsFromUser(vis.userId),
       location: vis.userId.location,
       registeredAt: vis.registeredAt,
       qrCode: vis.qrCode,
-      userType: 'visitor'
+      userType: 'visitor',
     }));
 
   successResponse(res, {
@@ -1476,6 +1518,8 @@ const addMultipleParticipantsToEvent = asyncHandler(async (req, res) => {
         userId,
         qrCode,
         registeredAt: new Date(),
+        isVerified: true,
+        approvalStatus: 'approved',
         addedBy: {
           userId: req.user.id,
           userType: req.user.type === 'organizer' ? 'Organizer' : 'Superadmin',
