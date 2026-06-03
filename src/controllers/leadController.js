@@ -60,23 +60,57 @@ const getLeads = asyncHandler(async (req, res) => {
     const { eventId } = req.body;
 
     let query = {};
-    
-    // If superAdmin, they can see all leads for a specific event or all leads if no eventId
-    if (userType === 'superAdmin') {
-      if (eventId) {
-        if (!mongoose.Types.ObjectId.isValid(eventId)) {
-          return errorResponse(res, 'Invalid event ID', 400);
-        }
-        query.eventId = eventId;
+
+    const resolveEventIdQuery = () => {
+      if (!eventId) return null;
+      if (!mongoose.Types.ObjectId.isValid(eventId)) {
+        return { error: 'Invalid event ID', status: 400 };
       }
+      return { eventId };
+    };
+
+    // superAdmin: all leads, optionally filtered by event
+    if (userType === 'superAdmin') {
+      const eventFilter = resolveEventIdQuery();
+      if (eventFilter?.error) {
+        return errorResponse(res, eventFilter.error, eventFilter.status);
+      }
+      if (eventFilter?.eventId) {
+        query.eventId = eventFilter.eventId;
+      }
+    } else if (userType === 'organizer') {
+      // Organizer: all leads for an event they manage (eventId required)
+      if (!eventId) {
+        return errorResponse(res, 'Event ID is required', 400);
+      }
+      if (!mongoose.Types.ObjectId.isValid(eventId)) {
+        return errorResponse(res, 'Invalid event ID', 400);
+      }
+
+      const event = await Event.findOne({ _id: eventId, isDeleted: false });
+      if (!event) {
+        return errorResponse(res, 'Event not found', 404);
+      }
+
+      const organizerId =
+        event.organizerId?._id?.toString() || event.organizerId?.toString();
+      const adminCreatorId =
+        event.createdByAdminId?._id?.toString() || event.createdByAdminId?.toString();
+
+      if (organizerId !== userId && adminCreatorId !== userId) {
+        return errorResponse(res, 'Access denied for this event', 403);
+      }
+
+      query.eventId = eventId;
     } else {
-      // For other users (exhibitor/visitor), they only see their own leads
+      // exhibitor / visitor: only their own leads
       query = { userId, userType };
-      if (eventId) {
-        if (!mongoose.Types.ObjectId.isValid(eventId)) {
-          return errorResponse(res, 'Invalid event ID', 400);
-        }
-        query.eventId = eventId;
+      const eventFilter = resolveEventIdQuery();
+      if (eventFilter?.error) {
+        return errorResponse(res, eventFilter.error, eventFilter.status);
+      }
+      if (eventFilter?.eventId) {
+        query.eventId = eventFilter.eventId;
       }
     }
 

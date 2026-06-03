@@ -81,7 +81,7 @@ router.post('/get-all-meetings', authMiddleware(['exhibitor', 'visitor']), getAl
 router.post('/get-scanuser-eventwise', authMiddleware(['exhibitor', 'visitor']), getScans);
 
 //leads
-router.post('/get-leads', authMiddleware(['exhibitor','visitor', 'superAdmin']), getLeads);
+router.post('/get-leads', authMiddleware(['exhibitor', 'visitor', 'organizer', 'superAdmin']), getLeads);
 router.post('/create-lead', authMiddleware(['exhibitor','visitor']), createLead);
 router.post('/update-lead', authMiddleware(['exhibitor','visitor']), updateLead);
 router.post('/delete-lead', authMiddleware(['exhibitor','visitor']), deleteLead);

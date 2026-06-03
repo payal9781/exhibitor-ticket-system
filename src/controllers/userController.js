@@ -419,7 +419,8 @@ const changeUserRole = asyncHandler(async (req, res) => {
 
 // Reset user password (admin sets the new password manually)
 const resetPassword = asyncHandler(async (req, res) => {
-  const { id, newPassword } = req.body;
+  const { id } = req.body;
+  const newPassword = typeof req.body.newPassword === 'string' ? req.body.newPassword.trim() : '';
 
   if (!newPassword || newPassword.length < 8) {
     return response.badRequest('New password must be at least 8 characters long', res);

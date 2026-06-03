@@ -3,6 +3,7 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const { 
   getEventByRegistrationLink,
+  checkEventRegistrationContact,
   registerExhibitorForEvent,
   registerVisitorForEvent,
   getEventRegistrationStats,
@@ -12,6 +13,7 @@ const {
 
 // Public routes for event registration (no auth required)
 router.get('/event/:registrationLink', getEventByRegistrationLink);
+router.post('/event/:registrationLink/check', checkEventRegistrationContact);
 router.post('/event/:registrationLink/exhibitor', registerExhibitorForEvent);
 router.post('/event/:registrationLink/visitor', registerVisitorForEvent);
 router.get('/upcoming-events', getUpcomingEventsForRegistration);

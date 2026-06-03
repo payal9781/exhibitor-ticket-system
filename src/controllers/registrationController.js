@@ -91,6 +91,64 @@ const applyRegistrationProfile = async (user, body) => {
   return { error: null };
 };
 
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
+const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '').slice(-10);
+
+const getEventParticipantContacts = async (event, userType) => {
+  const entries = userType === 'exhibitor' ? event.exhibitor : event.visitor;
+  const ids = entries.map((entry) => entry.userId).filter(Boolean);
+  if (!ids.length) {
+    return { entries, byId: new Map() };
+  }
+
+  const Model = userType === 'exhibitor' ? Exhibitor : Visitor;
+  const users = await Model.find({ _id: { $in: ids }, isDeleted: false })
+    .select('email phone')
+    .lean();
+  const byId = new Map(users.map((user) => [user._id.toString(), user]));
+  return { entries, byId };
+};
+
+const isEmailTakenOnEvent = (byId, entries, email, excludeUserId = null) => {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+
+  return entries.some((entry) => {
+    const userId = entry.userId.toString();
+    if (excludeUserId && userId === excludeUserId.toString()) return false;
+    const user = byId.get(userId);
+    return user && normalizeEmail(user.email) === normalized;
+  });
+};
+
+const isPhoneTakenOnEvent = (byId, entries, phone, excludeUserId = null) => {
+  const normalized = normalizePhone(phone);
+  if (normalized.length !== 10) return false;
+
+  return entries.some((entry) => {
+    const userId = entry.userId.toString();
+    if (excludeUserId && userId === excludeUserId.toString()) return false;
+    const user = byId.get(userId);
+    return user && normalizePhone(user.phone) === normalized;
+  });
+};
+
+const getEventContactConflict = async (event, userType, email, phone, excludeUserId = null) => {
+  const { entries, byId } = await getEventParticipantContacts(event, userType);
+  const roleLabel = userType === 'exhibitor' ? 'exhibitor' : 'visitor';
+
+  if (email && isEmailTakenOnEvent(byId, entries, email, excludeUserId)) {
+    return `This email is already registered for this event as a ${roleLabel}.`;
+  }
+
+  if (phone && isPhoneTakenOnEvent(byId, entries, phone, excludeUserId)) {
+    return `This phone number is already registered for this event as a ${roleLabel}.`;
+  }
+
+  return null;
+};
+
 // Get event registration details by registration link
 const getEventByRegistrationLink = asyncHandler(async (req, res) => {
   const { registrationLink } = req.params;
@@ -228,6 +286,18 @@ const registerExhibitorForEvent = asyncHandler(async (req, res) => {
   }
 
   const existingExhibitor = event.exhibitor.find(ex => ex.userId.toString() === exhibitor._id.toString());
+  if (!existingExhibitor) {
+    const contactConflict = await getEventContactConflict(
+      event,
+      'exhibitor',
+      exhibitorData.email,
+      exhibitorData.phone
+    );
+    if (contactConflict) {
+      return errorResponse(res, contactConflict, 400);
+    }
+  }
+
   if (existingExhibitor) {
     return successResponse(res, {
       message: 'Exhibitor is already registered for this event',
@@ -419,6 +489,18 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
   await visitor.save();
 
   const existingVisitor = event.visitor.find(vis => vis.userId.toString() === visitor._id.toString());
+  if (!existingVisitor) {
+    const contactConflict = await getEventContactConflict(
+      event,
+      'visitor',
+      visitorData.email,
+      visitorData.phone
+    );
+    if (contactConflict) {
+      return errorResponse(res, contactConflict, 400);
+    }
+  }
+
   if (existingVisitor) {
     return successResponse(res, {
       message: 'Visitor is already registered for this event',
@@ -519,6 +601,45 @@ const registerVisitorForEvent = asyncHandler(async (req, res) => {
     }
   });
 });
+// Check whether email/phone is already used on this event (public registration)
+const checkEventRegistrationContact = asyncHandler(async (req, res) => {
+  const { registrationLink } = req.params;
+  const { userType, email, phone } = req.body;
+
+  if (!['exhibitor', 'visitor'].includes(userType)) {
+    return errorResponse(res, 'Invalid registration type', 400);
+  }
+
+  const event = await Event.findOne({
+    registrationLink,
+    isDeleted: false,
+  });
+
+  if (!event) {
+    return errorResponse(res, 'Event not found or registration link is invalid', 404);
+  }
+
+  const { entries, byId } = await getEventParticipantContacts(event, userType);
+  const roleLabel = userType === 'exhibitor' ? 'exhibitor' : 'visitor';
+
+  const emailTaken = email ? isEmailTakenOnEvent(byId, entries, email) : false;
+  const phoneTaken =
+    phone && normalizePhone(phone).length === 10
+      ? isPhoneTakenOnEvent(byId, entries, phone)
+      : false;
+
+  successResponse(res, {
+    emailAvailable: !emailTaken,
+    phoneAvailable: !phoneTaken,
+    emailMessage: emailTaken
+      ? `This email is already registered for this event as a ${roleLabel}.`
+      : null,
+    phoneMessage: phoneTaken
+      ? `This phone number is already registered for this event as a ${roleLabel}.`
+      : null,
+  });
+});
+
 // Get event registration statistics
 const getEventRegistrationStats = asyncHandler(async (req, res) => {
   const { eventId } = req.params;
@@ -735,6 +856,7 @@ const registerForMultipleEvents = asyncHandler(async (req, res) => {
 
 module.exports = {
   getEventByRegistrationLink,
+  checkEventRegistrationContact,
   registerExhibitorForEvent,
   registerVisitorForEvent,
   getEventRegistrationStats,
