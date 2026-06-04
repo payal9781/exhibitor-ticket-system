@@ -20,8 +20,150 @@ const normalizeId = (value) => {
   return value;
 };
 
+const buildSearchQuery = (search, fields) => {
+  const term = search?.trim();
+  if (!term) return {};
+  const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  return { $or: fields.map((field) => ({ [field]: regex })) };
+};
+
 class NotificationBroadcastService {
-  async resolveRecipients({ audienceTypes = [], eventId = null }) {
+  async resolveSelectedRecipients({ selectedRecipients = [] }) {
+    if (!Array.isArray(selectedRecipients) || !selectedRecipients.length) {
+      return {
+        recipients: [],
+        counts: { exhibitor: 0, visitor: 0, organizer: 0, total: 0 },
+        withEmail: 0,
+        withFcm: 0,
+        eventTitle: null,
+      };
+    }
+
+    const grouped = { exhibitor: [], visitor: [], organizer: [] };
+    selectedRecipients.forEach((entry) => {
+      const userType = entry?.userType;
+      const id = normalizeId(entry?.id || entry?._id);
+      if (!id || !VALID_AUDIENCE.includes(userType)) return;
+      if (!grouped[userType].some((existing) => String(existing) === String(id))) {
+        grouped[userType].push(id);
+      }
+    });
+
+    const recipients = [];
+    const counts = { exhibitor: 0, visitor: 0, organizer: 0, total: 0 };
+
+    const fetchType = async (userType, Model) => {
+      const ids = grouped[userType];
+      if (!ids.length) return;
+      const users = await Model.find({
+        _id: { $in: ids },
+        isDeleted: false,
+        isActive: true,
+      });
+      counts[userType] = users.length;
+      users.forEach((user) => {
+        recipients.push({
+          _id: user._id,
+          userType,
+          name: getDisplayName(user, userType),
+          email: user.email || '',
+          fcmToken: user.fcmToken || '',
+        });
+      });
+    };
+
+    await fetchType('exhibitor', models.Exhibitor);
+    await fetchType('visitor', models.Visitor);
+    await fetchType('organizer', models.Organizer);
+
+    counts.total = recipients.length;
+    const withEmail = recipients.filter((r) => r.email?.trim()).length;
+    const withFcm = recipients.filter((r) => isValidFcmToken(r.fcmToken)).length;
+
+    return { recipients, counts, withEmail, withFcm, eventTitle: null };
+  }
+
+  async searchRecipients({
+    userType,
+    search = '',
+    eventId = null,
+    page = 1,
+    limit = 20,
+  }) {
+    if (!VALID_AUDIENCE.includes(userType)) {
+      throw new Error('Invalid user type');
+    }
+
+    const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    let query = { isDeleted: false, isActive: true };
+    let Model = models.Exhibitor;
+    let nameFields = ['companyName', 'email', 'phone'];
+
+    if (userType === 'visitor') {
+      Model = models.Visitor;
+      nameFields = ['name', 'email', 'phone', 'companyName'];
+    } else if (userType === 'organizer') {
+      Model = models.Organizer;
+      nameFields = ['name', 'email', 'organizationName', 'phone'];
+    }
+
+    Object.assign(query, buildSearchQuery(search, nameFields));
+
+    if (eventId && userType !== 'organizer') {
+      const event = await models.Event.findById(eventId).select('title exhibitor visitor organizerId');
+      if (!event) {
+        throw new Error('Event not found');
+      }
+      if (userType === 'exhibitor') {
+        const ids = event.exhibitor.map((e) => normalizeId(e.userId)).filter(Boolean);
+        query._id = { $in: ids };
+      } else {
+        const ids = event.visitor.map((v) => normalizeId(v.userId)).filter(Boolean);
+        query._id = { $in: ids };
+      }
+    } else if (eventId && userType === 'organizer') {
+      const event = await models.Event.findById(eventId).select('organizerId');
+      if (!event) {
+        throw new Error('Event not found');
+      }
+      query._id = normalizeId(event.organizerId);
+    }
+
+    const [users, total] = await Promise.all([
+      Model.find(query)
+        .select('name companyName email phone fcmToken organizationName')
+        .sort(userType === 'exhibitor' ? { companyName: 1 } : { name: 1 })
+        .skip(skip)
+        .limit(parsedLimit)
+        .lean(),
+      Model.countDocuments(query),
+    ]);
+
+    return {
+      users: users.map((user) => ({
+        _id: user._id,
+        userType,
+        name: getDisplayName(user, userType),
+        email: user.email || '',
+        hasEmail: Boolean(user.email?.trim()),
+        hasFcm: isValidFcmToken(user.fcmToken),
+      })),
+      pagination: {
+        page: parsedPage,
+        limit: parsedLimit,
+        total,
+        totalPages: Math.ceil(total / parsedLimit) || 1,
+      },
+    };
+  }
+
+  async resolveRecipients({ audienceTypes = [], eventId = null, recipientMode, selectedRecipients }) {
+    if (recipientMode === 'selected') {
+      return this.resolveSelectedRecipients({ selectedRecipients });
+    }
     const types = audienceTypes.filter((t) => VALID_AUDIENCE.includes(t));
     const recipients = [];
 
@@ -119,6 +261,7 @@ class NotificationBroadcastService {
       withEmail: result.withEmail,
       withFcm: result.withFcm,
       eventTitle: result.eventTitle,
+      targetMode: payload.recipientMode === 'selected' ? 'selected' : 'broadcast',
     };
   }
 
@@ -160,6 +303,8 @@ class NotificationBroadcastService {
     channel,
     audienceTypes,
     eventId,
+    recipientMode,
+    selectedRecipients,
     title,
     body,
     emailSubject,
@@ -182,11 +327,34 @@ class NotificationBroadcastService {
       throw new Error('Email subject is required for email notifications');
     }
 
-    const { recipients, eventTitle } = await this.resolveRecipients({ audienceTypes, eventId });
+    const isSelectedMode = recipientMode === 'selected';
+
+    if (isSelectedMode) {
+      if (!Array.isArray(selectedRecipients) || !selectedRecipients.length) {
+        throw new Error('Select at least one recipient');
+      }
+    } else if (!Array.isArray(audienceTypes) || !audienceTypes.length) {
+      throw new Error('Select at least one audience type');
+    }
+
+    const { recipients, eventTitle } = await this.resolveRecipients({
+      audienceTypes,
+      eventId,
+      recipientMode,
+      selectedRecipients,
+    });
 
     if (!recipients.length) {
-      throw new Error('No recipients found for the selected audience');
+      throw new Error(
+        isSelectedMode
+          ? 'No valid recipients found for your selection'
+          : 'No recipients found for the selected audience'
+      );
     }
+
+    const loggedAudienceTypes = isSelectedMode
+      ? [...new Set(recipients.map((r) => r.userType))]
+      : audienceTypes;
 
     const stats = {
       totalRecipients: recipients.length,
@@ -280,7 +448,9 @@ class NotificationBroadcastService {
       body: body || '',
       emailSubject: emailSubject || '',
       channel,
-      audienceTypes,
+      targetMode: isSelectedMode ? 'selected' : 'broadcast',
+      audienceTypes: loggedAudienceTypes,
+      selectedRecipientCount: isSelectedMode ? selectedRecipients.length : 0,
       eventId: eventId || null,
       eventTitle: eventTitle || '',
       sentBy,

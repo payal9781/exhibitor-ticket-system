@@ -11,11 +11,17 @@ const adminNotificationLogSchema = new mongoose.Schema(
       enum: ['email', 'push', 'both'],
       required: true,
     },
+    targetMode: {
+      type: String,
+      enum: ['broadcast', 'selected'],
+      default: 'broadcast',
+    },
     audienceTypes: {
       type: [String],
       enum: ['exhibitor', 'visitor', 'organizer'],
-      required: true,
+      default: [],
     },
+    selectedRecipientCount: { type: Number, default: 0 },
     eventId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Event',

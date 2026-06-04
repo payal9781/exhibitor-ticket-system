@@ -7,23 +7,50 @@ const VALID_AUDIENCE = ['exhibitor', 'visitor', 'organizer'];
 const VALID_CHANNELS = ['email', 'push', 'both'];
 
 const previewRecipients = asyncHandler(async (req, res) => {
-  const { audienceTypes = [], eventId } = req.body;
+  const { audienceTypes = [], eventId, recipientMode, selectedRecipients } = req.body;
 
-  if (!Array.isArray(audienceTypes) || !audienceTypes.length) {
+  if (recipientMode === 'selected') {
+    if (!Array.isArray(selectedRecipients) || !selectedRecipients.length) {
+      return errorResponse(res, 'Select at least one recipient', 400);
+    }
+  } else if (!Array.isArray(audienceTypes) || !audienceTypes.length) {
     return errorResponse(res, 'Select at least one audience type', 400);
-  }
-
-  const invalidTypes = audienceTypes.filter((t) => !VALID_AUDIENCE.includes(t));
-  if (invalidTypes.length) {
-    return errorResponse(res, 'Invalid audience type', 400);
+  } else {
+    const invalidTypes = audienceTypes.filter((t) => !VALID_AUDIENCE.includes(t));
+    if (invalidTypes.length) {
+      return errorResponse(res, 'Invalid audience type', 400);
+    }
   }
 
   try {
     const preview = await notificationBroadcastService.previewRecipients({
       audienceTypes,
       eventId: eventId || null,
+      recipientMode,
+      selectedRecipients,
     });
     successResponse(res, preview);
+  } catch (error) {
+    return errorResponse(res, error.message, 400);
+  }
+});
+
+const searchRecipients = asyncHandler(async (req, res) => {
+  const { userType, search = '', eventId, page = 1, limit = 20 } = req.body;
+
+  if (!VALID_AUDIENCE.includes(userType)) {
+    return errorResponse(res, 'Invalid user type', 400);
+  }
+
+  try {
+    const result = await notificationBroadcastService.searchRecipients({
+      userType,
+      search,
+      eventId: eventId || null,
+      page,
+      limit,
+    });
+    successResponse(res, result);
   } catch (error) {
     return errorResponse(res, error.message, 400);
   }
@@ -34,6 +61,8 @@ const sendNotification = asyncHandler(async (req, res) => {
     channel,
     audienceTypes = [],
     eventId,
+    recipientMode,
+    selectedRecipients,
     title,
     body,
     emailSubject,
@@ -44,13 +73,18 @@ const sendNotification = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Invalid channel. Use email, push, or both', 400);
   }
 
-  if (!Array.isArray(audienceTypes) || !audienceTypes.length) {
-    return errorResponse(res, 'Select at least one audience type', 400);
-  }
-
-  const invalidTypes = audienceTypes.filter((t) => !VALID_AUDIENCE.includes(t));
-  if (invalidTypes.length) {
-    return errorResponse(res, 'Invalid audience type', 400);
+  if (recipientMode === 'selected') {
+    if (!Array.isArray(selectedRecipients) || !selectedRecipients.length) {
+      return errorResponse(res, 'Select at least one recipient', 400);
+    }
+  } else {
+    if (!Array.isArray(audienceTypes) || !audienceTypes.length) {
+      return errorResponse(res, 'Select at least one audience type', 400);
+    }
+    const invalidTypes = audienceTypes.filter((t) => !VALID_AUDIENCE.includes(t));
+    if (invalidTypes.length) {
+      return errorResponse(res, 'Invalid audience type', 400);
+    }
   }
 
   if (!title?.trim()) {
@@ -62,6 +96,8 @@ const sendNotification = asyncHandler(async (req, res) => {
       channel,
       audienceTypes,
       eventId: eventId || null,
+      recipientMode,
+      selectedRecipients,
       title: title.trim(),
       body: body?.trim() || '',
       emailSubject: emailSubject?.trim() || title.trim(),
@@ -130,6 +166,7 @@ const getEventsForFilter = asyncHandler(async (req, res) => {
 
 module.exports = {
   previewRecipients,
+  searchRecipients,
   sendNotification,
   getNotificationHistory,
   getEventsForFilter,

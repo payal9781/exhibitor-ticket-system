@@ -10,6 +10,7 @@ const {
 } = require('../controllers/otpManagementController');
 const {
   previewRecipients,
+  searchRecipients,
   sendNotification,
   getNotificationHistory,
   getEventsForFilter,
@@ -28,6 +29,7 @@ router.post('/otp/delete', authMiddleware(['superAdmin']), deleteOtp);
 router.post('/otp/delete-all', authMiddleware(['superAdmin']), deleteAllOtps);
 
 router.post('/notifications/preview', authMiddleware(['superAdmin']), previewRecipients);
+router.post('/notifications/search-recipients', authMiddleware(['superAdmin']), searchRecipients);
 router.post('/notifications/send', authMiddleware(['superAdmin']), sendNotification);
 router.post('/notifications/history', authMiddleware(['superAdmin']), getNotificationHistory);
 router.post('/notifications/events', authMiddleware(['superAdmin']), getEventsForFilter);
