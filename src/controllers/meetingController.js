@@ -471,8 +471,11 @@ const getEventSlotBookings = asyncHandler(async (req, res) => {
   const UserEventSlot = require('../models/UserEventSlot');
 
   // Event details
-  const event = await Event.findById(eventId).select('title fromDate toDate location');
-  if (!event) return errorResponse(res, 'Event not found', 404);
+  const event = await Event.findById(eventId).select('title fromDate toDate location organizerId isDeleted');
+  if (!event || event.isDeleted) return errorResponse(res, 'Event not found', 404);
+  if (req.user.type === 'organizer' && event.organizerId?.toString() !== req.user.id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
 
   // All meetings for this event (all statuses)
   const meetings = await Meeting.find({ eventId }).sort({ slotStart: 1 });

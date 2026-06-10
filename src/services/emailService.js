@@ -410,9 +410,143 @@ const sendCustomEmail = async (to, subject, htmlContent, recipientName = 'User')
   }
 };
 
+// Organizer self-registration: account pending admin approval
+const sendOrganizerRegistrationPendingEmail = async (name, email, organizationName) => {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.error('CRITICAL: SMTP configuration is missing in .env file!');
+    return false;
+  }
+
+  const transporter = createTransporter();
+  const loginUrl = `${process.env.FRONTEND_URL || '#'}/login`;
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to: email,
+    subject: 'Planora — Organizer registration received',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Registration Received - Planora</title>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #334155; max-width: 600px; margin: 0 auto; background-color: #f8fafc; }
+          .container { margin: 40px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+          .header { background: linear-gradient(135deg, #C73A33 0%, #E5534B 100%); color: white; padding: 36px 20px; text-align: center; }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 800; }
+          .content { padding: 36px; }
+          .greeting { font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
+          .info-box { background-color: #fff7ed; border-left: 4px solid #f97316; padding: 16px; border-radius: 4px; margin: 24px 0; color: #9a3412; font-size: 14px; }
+          .detail { margin: 8px 0; font-size: 15px; }
+          .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 13px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header"><h1>Planora</h1></div>
+          <div class="content">
+            <p class="greeting">Hello ${name},</p>
+            <p>Thank you for registering as an organizer on Planora. We have received your application.</p>
+            <div class="detail"><strong>Organization:</strong> ${organizationName || '—'}</div>
+            <div class="detail"><strong>Email:</strong> ${email}</div>
+            <div class="info-box">
+              <strong>Pending approval:</strong> Your account is currently inactive. A super admin will review and activate your account. You will receive another email when you can sign in.
+            </div>
+            <p>Once approved, you can log in here: <a href="${loginUrl}">${loginUrl}</a></p>
+            <p>Best regards,<br><strong>The Planora Team</strong></p>
+          </div>
+          <div class="footer">
+            <p>This is an automated message, please do not reply.</p>
+            <p>&copy; ${new Date().getFullYear()} Planora. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Organizer pending registration email sent:', info.messageId);
+    return true;
+  } catch (error) {
+    console.error('Error sending organizer pending registration email:', error);
+    return false;
+  }
+};
+
+// Organizer account approved / activated by admin
+const sendOrganizerAccountApprovedEmail = async (name, email) => {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.error('CRITICAL: SMTP configuration is missing in .env file!');
+    return false;
+  }
+
+  const transporter = createTransporter();
+  const loginUrl = `${process.env.FRONTEND_URL || '#'}/login`;
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to: email,
+    subject: 'Planora — Your organizer account is now active',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Account Approved - Planora</title>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #334155; max-width: 600px; margin: 0 auto; background-color: #f8fafc; }
+          .container { margin: 40px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+          .header { background: linear-gradient(135deg, #C73A33 0%, #E5534B 100%); color: white; padding: 36px 20px; text-align: center; }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 800; }
+          .content { padding: 36px; }
+          .greeting { font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
+          .success-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 16px; border-radius: 4px; margin: 24px 0; color: #166534; font-size: 14px; }
+          .button { display: inline-block; background-color: #C73A33; color: white !important; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 700; margin-top: 16px; }
+          .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 13px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header"><h1>Planora</h1></div>
+          <div class="content">
+            <p class="greeting">Hello ${name},</p>
+            <div class="success-box">
+              <strong>Good news!</strong> Your organizer account has been approved and activated. You can now sign in to Planora.
+            </div>
+            <p>Use the email address you registered with and your password to access your dashboard.</p>
+            <p style="text-align: center;"><a href="${loginUrl}" class="button">Log in to Planora</a></p>
+            <p>Best regards,<br><strong>The Planora Team</strong></p>
+          </div>
+          <div class="footer">
+            <p>This is an automated message, please do not reply.</p>
+            <p>&copy; ${new Date().getFullYear()} Planora. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Organizer account approved email sent:', info.messageId);
+    return true;
+  } catch (error) {
+    console.error('Error sending organizer account approved email:', error);
+    return false;
+  }
+};
+
 module.exports = {
   sendPasswordResetEmail,
   sendWelcomeEmail,
+  sendOrganizerRegistrationPendingEmail,
+  sendOrganizerAccountApprovedEmail,
   testEmailConfig,
   sendCustomEmail,
 };

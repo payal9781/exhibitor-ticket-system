@@ -15,6 +15,58 @@ const {
   Notification
 } = models;
 
+const isSuperAdminUser = (user) =>
+  user?.type === 'superAdmin' || user?.type === 'superadmin';
+
+const getOrganizerEventIds = async (organizerId) =>
+  Event.find({ organizerId, isDeleted: false }).distinct('_id');
+
+const organizerOwnsEvent = (event, organizerId) =>
+  !!(event && !event.isDeleted && event.organizerId?.toString() === organizerId);
+
+const assertOrganizerRoomAccess = async (req, res, room) => {
+  if (!room || room.isDeleted) {
+    return response.notFound('Room not found', res);
+  }
+  if (isSuperAdminUser(req.user)) {
+    return null;
+  }
+  if (req.user.type !== 'organizer') {
+    return null;
+  }
+  const event = await Event.findById(room.eventId).select('organizerId isDeleted');
+  if (!organizerOwnsEvent(event, req.user.id)) {
+    return response.forbidden('You do not have access to this room', res);
+  }
+  return null;
+};
+
+const assertOrganizerRoundAccess = async (req, res, roundId) => {
+  const round = await RoomReferralRound.findById(roundId);
+  if (!round) {
+    return { error: response.notFound('Round not found', res) };
+  }
+  const room = await RoomReferralRoom.findOne({ _id: round.roomId, isDeleted: false });
+  const accessError = await assertOrganizerRoomAccess(req, res, room);
+  if (accessError) {
+    return { error: accessError };
+  }
+  return { round, room };
+};
+
+const applyOrganizerRoomListFilter = async (req, eventId) => {
+  if (req.user.type !== 'organizer') {
+    return eventId ? { eventId } : {};
+  }
+
+  const eventIds = await getOrganizerEventIds(req.user.id);
+  if (eventId) {
+    const ownsEvent = eventIds.some((id) => id.toString() === eventId.toString());
+    return ownsEvent ? { eventId } : { eventId: { $in: [] } };
+  }
+  return { eventId: { $in: eventIds } };
+};
+
 // ==========================================
 // ADMIN CONTROLLERS
 // ==========================================
@@ -32,6 +84,9 @@ const createRoom = asyncHandler(async (req, res) => {
   const event = await Event.findById(eventId);
   if (!event || event.isDeleted) {
     return response.notFound('Event not found or deleted', res);
+  }
+  if (req.user.type === 'organizer' && !organizerOwnsEvent(event, req.user.id)) {
+    return response.forbidden('You can only create rooms for your own events', res);
   }
 
   let banner = '';
@@ -66,9 +121,8 @@ const updateRoom = asyncHandler(async (req, res) => {
   const updateData = { ...req.body };
 
   const room = await RoomReferralRoom.findOne({ _id: roomId, isDeleted: false });
-  if (!room) {
-    return response.notFound('Room not found', res);
-  }
+  const accessError = await assertOrganizerRoomAccess(req, res, room);
+  if (accessError) return accessError;
 
   if (req.file) {
     updateData.banner = `uploads/${req.file.filename}`;
@@ -78,6 +132,9 @@ const updateRoom = asyncHandler(async (req, res) => {
     const event = await Event.findById(updateData.eventId);
     if (!event || event.isDeleted) {
       return response.notFound('Event not found', res);
+    }
+    if (req.user.type === 'organizer' && !organizerOwnsEvent(event, req.user.id)) {
+      return response.forbidden('You can only assign rooms to your own events', res);
     }
     updateData.eventName = event.title;
   }
@@ -93,9 +150,8 @@ const deleteRoom = asyncHandler(async (req, res) => {
   const { roomId } = req.params;
 
   const room = await RoomReferralRoom.findOne({ _id: roomId, isDeleted: false });
-  if (!room) {
-    return response.notFound('Room not found', res);
-  }
+  const accessError = await assertOrganizerRoomAccess(req, res, room);
+  if (accessError) return accessError;
 
   room.isDeleted = true;
   await room.save();
@@ -110,9 +166,8 @@ const createRound = asyncHandler(async (req, res) => {
   const { roomId, name, roundNumber } = req.body;
 
   const room = await RoomReferralRoom.findOne({ _id: roomId, isDeleted: false });
-  if (!room) {
-    return response.notFound('Room not found', res);
-  }
+  const accessError = await assertOrganizerRoomAccess(req, res, room);
+  if (accessError) return accessError;
 
   // Check if round number already exists for this room
   const existingRound = await RoomReferralRound.findOne({ roomId, roundNumber });
@@ -137,10 +192,9 @@ const updateRound = asyncHandler(async (req, res) => {
   const { roundId } = req.params;
   const { name, roundNumber } = req.body;
 
-  const round = await RoomReferralRound.findById(roundId);
-  if (!round) {
-    return response.notFound('Round not found', res);
-  }
+  const roundAccess = await assertOrganizerRoundAccess(req, res, roundId);
+  if (roundAccess.error) return roundAccess.error;
+  const { round } = roundAccess;
 
   if (roundNumber !== undefined && roundNumber !== round.roundNumber) {
     const existingRound = await RoomReferralRound.findOne({ roomId: round.roomId, roundNumber });
@@ -164,10 +218,9 @@ const updateRound = asyncHandler(async (req, res) => {
 const deleteRound = asyncHandler(async (req, res) => {
   const { roundId } = req.params;
 
-  const round = await RoomReferralRound.findById(roundId);
-  if (!round) {
-    return response.notFound('Round not found', res);
-  }
+  const roundAccess = await assertOrganizerRoundAccess(req, res, roundId);
+  if (roundAccess.error) return roundAccess.error;
+  const { round } = roundAccess;
 
   await RoomReferralRound.findByIdAndDelete(roundId);
   // Also clean up any referral entries made in this round
@@ -182,10 +235,9 @@ const deleteRound = asyncHandler(async (req, res) => {
 const addUsersToRound = asyncHandler(async (req, res) => {
   const { roundId, participants } = req.body; // participants: [{ userId, userModel }]
 
-  const round = await RoomReferralRound.findById(roundId);
-  if (!round) {
-    return response.notFound('Round not found', res);
-  }
+  const roundAccess = await assertOrganizerRoundAccess(req, res, roundId);
+  if (roundAccess.error) return roundAccess.error;
+  const { round } = roundAccess;
 
   // Validate each user and add if not already in participants
   const updatedParticipants = [...round.participants];
@@ -229,10 +281,9 @@ const addUsersToRound = asyncHandler(async (req, res) => {
 const addUsersToRoundByFilter = asyncHandler(async (req, res) => {
   const { roundId, filters } = req.body; // filters: { sector, category, userType }
 
-  const round = await RoomReferralRound.findById(roundId);
-  if (!round) {
-    return response.notFound('Round not found', res);
-  }
+  const roundAccess = await assertOrganizerRoundAccess(req, res, roundId);
+  if (roundAccess.error) return roundAccess.error;
+  const { round } = roundAccess;
 
   // Build query
   const query = { isDeleted: false, isActive: true };
@@ -295,10 +346,9 @@ const addUsersToRoundByFilter = asyncHandler(async (req, res) => {
 const removeUserFromRound = asyncHandler(async (req, res) => {
   const { roundId, userId } = req.body;
 
-  const round = await RoomReferralRound.findById(roundId);
-  if (!round) {
-    return response.notFound('Round not found', res);
-  }
+  const roundAccess = await assertOrganizerRoundAccess(req, res, roundId);
+  if (roundAccess.error) return roundAccess.error;
+  const { round } = roundAccess;
 
   const index = round.participants.findIndex(p => p.userId.toString() === userId.toString());
   if (index === -1) {
@@ -322,6 +372,10 @@ const getRoomDetails = asyncHandler(async (req, res) => {
   const room = await RoomReferralRoom.findOne({ _id: roomId, isDeleted: false });
   if (!room) {
     return response.notFound('Room not found', res);
+  }
+  if (req.user.type === 'organizer') {
+    const accessError = await assertOrganizerRoomAccess(req, res, room);
+    if (accessError) return accessError;
   }
 
   // Find rounds
@@ -363,10 +417,7 @@ const getRoomDetails = asyncHandler(async (req, res) => {
 const listRooms = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, search = '', eventId } = req.body;
 
-  const query = { isDeleted: false };
-  if (eventId) {
-    query.eventId = eventId;
-  }
+  const query = { isDeleted: false, ...(await applyOrganizerRoomListFilter(req, eventId)) };
   if (search) {
     query.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -424,9 +475,8 @@ const exportRoomReferralsToExcel = asyncHandler(async (req, res) => {
   const { roomId } = req.params;
 
   const room = await RoomReferralRoom.findOne({ _id: roomId, isDeleted: false });
-  if (!room) {
-    return res.status(404).send('Room not found or deleted');
-  }
+  const accessError = await assertOrganizerRoomAccess(req, res, room);
+  if (accessError) return accessError;
 
   const referrals = await RoomReferralEntry.find({ roomId })
     .populate('roundId')

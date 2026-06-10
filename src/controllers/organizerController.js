@@ -1,6 +1,21 @@
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const asyncHandler = require('express-async-handler');
 const Organizer = require('../models/Organizer');
+const organizerNotificationService = require('../services/organizerNotificationService');
+
+const notifyOrganizerIfActivated = async (organizer, wasActive) => {
+  if (!wasActive && organizer.isActive && organizer.email) {
+    try {
+      await organizerNotificationService.notifyOrganizerAccountActivated({
+        name: organizer.name,
+        email: organizer.email,
+        phone: organizer.phone,
+      });
+    } catch (error) {
+      console.error('Failed to send organizer activation notifications:', error);
+    }
+  }
+};
 
 const createOrganizer = asyncHandler(async (req, res) => {
   const { firstName, lastName, company, email, password, phone, ...rest } = req.body;
@@ -45,7 +60,7 @@ const createOrganizer = asyncHandler(async (req, res) => {
     }
   };
 
-  const organizer = new Organizer(organizerData);
+  const organizer = new Organizer({ ...organizerData, isActive: true });
   await organizer.save();
 
   const response = {
@@ -128,14 +143,18 @@ const updateOrganizer = asyncHandler(async (req, res) => {
       : (existingExtraDetails.businessInfo || {})
   };
 
+  const wasActive = organizer.isActive;
+
   Object.assign(organizer, {
     email: email || organizer.email,
     phone: phone || organizer.phone,
     address: rest.address || organizer.address,
-    extraDetails: extraDetails
+    extraDetails: extraDetails,
+    ...(rest.isActive !== undefined ? { isActive: rest.isActive } : {}),
   });
 
   await organizer.save();
+  await notifyOrganizerIfActivated(organizer, wasActive);
 
   const response = {
     ...organizer.toObject(),
@@ -162,9 +181,10 @@ const toggleOrganizerStatus = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Access denied', 403);
   }
 
-  // Toggle the isActive status
+  const wasActive = organizer.isActive;
   organizer.isActive = !organizer.isActive;
   await organizer.save();
+  await notifyOrganizerIfActivated(organizer, wasActive);
 
   const response = {
     ...organizer.toObject(),
@@ -221,6 +241,7 @@ const getOrganizers = asyncHandler(async (req, res) => {
   const total = await Organizer.countDocuments(query);
   
   const organizers = await Organizer.find(query)
+    .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit))
     .select('-password -resetPasswordToken -resetPasswordExpires');

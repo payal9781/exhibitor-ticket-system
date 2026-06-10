@@ -2,6 +2,7 @@ const { successResponse } = require('../utils/apiResponse');
 const asyncHandler = require('express-async-handler');
 const Event = require('../models/Event');
 const Organizer = require('../models/Organizer');
+const { parseDateOnlyStart, parseDateOnlyEnd } = require('../utils/dashboardHelpers');
 
 const SELF_REGISTRATION_TYPES = ['Exhibitor', 'Visitor'];
 
@@ -30,33 +31,17 @@ const attributionAddFields = (participantKey) => ({
   },
 });
 
-const buildDateMatch = (startDate, endDate, participantKey) => {
-  if (!startDate && !endDate) return null;
+const buildOrganizerJoinedQuery = (startDate, endDate) => {
+  const query = { isDeleted: false };
+  if (!startDate && !endDate) return query;
 
-  const dateExpr = {
-    $ifNull: [
-      `$${participantKey}.addedBy.addedAt`,
-      `$${participantKey}.registeredAt`,
-    ],
-  };
-
-  const conditions = [];
-  if (startDate) {
-    conditions.push({ $gte: [dateExpr, new Date(startDate)] });
-  }
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    conditions.push({ $lte: [dateExpr, end] });
-  }
-
-  return conditions.length === 1
-    ? conditions[0]
-    : { $and: conditions };
+  query.createdAt = {};
+  if (startDate) query.createdAt.$gte = parseDateOnlyStart(startDate);
+  if (endDate) query.createdAt.$lte = parseDateOnlyEnd(endDate);
+  return query;
 };
 
-const aggregateParticipantStats = async (participantKey, filters = {}) => {
-  const { startDate, endDate, eventId } = filters;
+const aggregateParticipantStats = async (participantKey, eventId) => {
   const match = { isDeleted: false };
   if (eventId) match._id = eventId;
 
@@ -65,14 +50,6 @@ const aggregateParticipantStats = async (participantKey, filters = {}) => {
     { $unwind: `$${participantKey}` },
     { $addFields: attributionAddFields(participantKey) },
     { $match: { attributedOrganizer: { $ne: null } } },
-  ];
-
-  const dateMatch = buildDateMatch(startDate, endDate, participantKey);
-  if (dateMatch) {
-    pipeline.push({ $match: { $expr: dateMatch } });
-  }
-
-  pipeline.push(
     {
       $group: {
         _id: '$attributedOrganizer',
@@ -85,20 +62,40 @@ const aggregateParticipantStats = async (participantKey, filters = {}) => {
         count: 1,
         uniqueCount: { $size: '$uniqueUsers' },
       },
-    }
-  );
+    },
+  ];
 
   return Event.aggregate(pipeline);
 };
 
 const getOrganizerAnalytics = asyncHandler(async (req, res) => {
-  const filters = req.body?.filters || req.body || {};
-  const { search, sortBy = 'totalAdded', sortOrder = 'desc' } = filters;
+  const filters = { ...(req.body?.filters || req.body || {}) };
+  const { search, sortBy = 'totalAdded', sortOrder = 'desc', startDate, endDate, eventId } = filters;
+
+  if (startDate && endDate) {
+    const from = parseDateOnlyStart(startDate);
+    const to = parseDateOnlyEnd(endDate);
+    if (from && to && from > to) {
+      return successResponse(res, {
+        summary: {
+          totalOrganizers: 0,
+          totalExhibitorsAdded: 0,
+          totalVisitorsAdded: 0,
+          totalRegistrations: 0,
+        },
+        organizers: [],
+      });
+    }
+  }
+
+  const organizerQuery = buildOrganizerJoinedQuery(startDate, endDate);
 
   const [exhibitorStats, visitorStats, organizers] = await Promise.all([
-    aggregateParticipantStats('exhibitor', filters),
-    aggregateParticipantStats('visitor', filters),
-    Organizer.find({ isDeleted: false }).select('name email organizationName isActive createdAt').lean(),
+    aggregateParticipantStats('exhibitor', eventId),
+    aggregateParticipantStats('visitor', eventId),
+    Organizer.find(organizerQuery)
+      .select('name email organizationName isActive createdAt')
+      .lean(),
   ]);
 
   const exhibitorMap = new Map(
@@ -119,6 +116,7 @@ const getOrganizerAnalytics = asyncHandler(async (req, res) => {
       email: organizer.email,
       organizationName: organizer.organizationName || '',
       isActive: organizer.isActive,
+      createdAt: organizer.createdAt,
       exhibitorsAdded: exhibitors.count,
       uniqueExhibitors: exhibitors.uniqueCount,
       visitorsAdded: visitors.count,
@@ -146,9 +144,17 @@ const getOrganizerAnalytics = asyncHandler(async (req, res) => {
           ? 'visitorsAdded'
           : sortBy === 'name'
             ? 'name'
-            : 'totalAdded';
+            : sortBy === 'createdAt'
+              ? 'createdAt'
+              : 'totalAdded';
     if (field === 'name') {
       return sortMultiplier * (a.name || '').localeCompare(b.name || '');
+    }
+    if (field === 'createdAt') {
+      return (
+        sortMultiplier *
+        (new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+      );
     }
     return sortMultiplier * ((a[field] || 0) - (b[field] || 0));
   });

@@ -15,7 +15,7 @@ const fs = require('fs/promises');
 const {v4:uuidv4} = require('uuid');
 const approvalService = require('../services/approvalService');
 const Organizer = require('../models/Organizer');
-const { shouldShowInEventBookings } = require('../utils/participantApproval');
+const { shouldShowInEventBookings, resolveApprovalStatus } = require('../utils/participantApproval');
 const {
   profileIndustrySectorSelect,
   formatIndustryLabelFromUser,
@@ -993,39 +993,53 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
     }
   }
 
+  if (!isNewRegistration) {
+    const label = participantType === 'exhibitor'
+      ? (participant.companyName || 'Exhibitor')
+      : (participant.name || 'Visitor');
+    const existingEntry = participantType === 'exhibitor'
+      ? event.exhibitor.find((ex) => ex.userId.toString() === participant._id.toString())
+      : event.visitor.find((vis) => vis.userId.toString() === participant._id.toString());
+    const status = resolveApprovalStatus(existingEntry);
+
+    if (status === 'pending') {
+      return errorResponse(res, `${label} has a pending registration request in Approval Management`, 400);
+    }
+    if (status === 'rejected') {
+      return errorResponse(res, `${label} was rejected for this event`, 400);
+    }
+    return errorResponse(res, `${label} is already registered for this event`, 400);
+  }
+
   await event.save();
 
-  if (isNewRegistration) {
-    const existingSlots = await UserEventSlot.findOne({
+  const existingSlots = await UserEventSlot.findOne({
+    userId: participant._id,
+    userType: participantType,
+    eventId
+  });
+
+  if (!existingSlots) {
+    const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
+    const slots = rawSlots.map(s => ({
+      start: s.start,
+      end: s.end,
+      status: 'available',
+      showSlots: false
+    }));
+    const userSlot = new UserEventSlot({
       userId: participant._id,
       userType: participantType,
-      eventId
+      eventId,
+      slots
     });
-
-    if (!existingSlots) {
-      const rawSlots = generateSlots(event.fromDate, event.toDate, event.startTime, event.endTime);
-      const slots = rawSlots.map(s => ({ 
-        start: s.start, 
-        end: s.end, 
-        status: 'available',
-        showSlots: false 
-      }));
-      const userSlot = new UserEventSlot({
-        userId: participant._id,
-        userType: participantType,
-        eventId,
-        slots
-      });
-      await userSlot.save();
-    }
+    await userSlot.save();
   }
 
   successResponse(res, {
-    message: isNewRegistration ?
-      `${participantType} added to event successfully` :
-      `${participantType} already registered for this event`,
+    message: `${participantType} added to event successfully`,
     qrCode,
-    isNewRegistration,
+    isNewRegistration: true,
     isNewParticipant,
     participant: {
       _id: participant._id,
@@ -1039,6 +1053,37 @@ const addParticipantToEvent = asyncHandler(async (req, res) => {
       fromDate: event.fromDate,
       toDate: event.toDate
     }
+  });
+});
+
+const getEventParticipantRegistrationStatus = asyncHandler(async (req, res) => {
+  const { eventId } = req.body;
+
+  if (!eventId) {
+    return errorResponse(res, 'Event ID is required', 400);
+  }
+
+  const event = await Event.findById(eventId).select('organizerId exhibitor.userId exhibitor.approvalStatus exhibitor.isVerified exhibitor.rejectedAt exhibitor.rejectedBy exhibitor.addedBy visitor.userId visitor.approvalStatus visitor.isVerified visitor.rejectedAt visitor.rejectedBy visitor.addedBy');
+  if (!event) {
+    return errorResponse(res, 'Event not found', 404);
+  }
+
+  if (req.user.type === 'organizer' && event.organizerId.toString() !== req.user.id) {
+    return errorResponse(res, 'Access denied', 403);
+  }
+
+  const mapStatuses = (entries = []) =>
+    entries
+      .filter((entry) => entry.userId)
+      .map((entry) => ({
+        _id: entry.userId.toString(),
+        status: resolveApprovalStatus(entry),
+      }));
+
+  successResponse(res, {
+    eventId,
+    exhibitor: mapStatuses(event.exhibitor),
+    visitor: mapStatuses(event.visitor),
   });
 });
 
@@ -1944,6 +1989,7 @@ module.exports = {
   getUpcomingEvents,
   getAllParticipants,
   addParticipantToEvent,
+  getEventParticipantRegistrationStatus,
   getEventParticipants,
   updateEventStatus,
   getEventStatusStats,

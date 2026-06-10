@@ -16,6 +16,7 @@ const {
   getUpcomingEvents,
   getAllParticipants,
   addParticipantToEvent,
+  getEventParticipantRegistrationStatus,
   getEventParticipants,
   updateEventStatus,
   getEventStatusStats,
@@ -49,6 +50,7 @@ router.post('/stats', authMiddleware(['organizer', 'superAdmin']), getEventStats
 router.post('/upcoming', authMiddleware(['organizer', 'superAdmin']), getUpcomingEvents);
 router.post('/all-participants', authMiddleware(['organizer', 'superAdmin']), getAllParticipants);
 router.post('/add-participant', authMiddleware(['organizer', 'superAdmin']), addParticipantToEvent);
+router.post('/participant-registration-status', authMiddleware(['organizer', 'superAdmin']), getEventParticipantRegistrationStatus);
 router.post('/participants', authMiddleware(['organizer', 'superAdmin']), getEventParticipants);
 router.post('/update-status', authMiddleware(['organizer', 'superAdmin']), updateEventStatus);
 router.post('/status-stats', authMiddleware(['organizer', 'superAdmin']), getEventStatusStats);

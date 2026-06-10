@@ -1,12 +1,18 @@
 const Joi = require('joi');
 
 const register = Joi.object({
-  name: Joi.string().required(),
+  name: Joi.string().trim().min(2).max(120).required(),
   email: Joi.string().email().required(),
-  password: Joi.string().min(6).required(),
+  password: Joi.string().min(8).required(),
   role: Joi.string().valid('superAdmin', 'organizer', 'exhibitor', 'visitor').required(),
-  phone: Joi.string().optional(),
-  organizationName: Joi.string().when('role', { is: 'organizer', then: Joi.required() }),
+  phone: Joi.string().when('role', {
+    is: 'organizer',
+    then: Joi.string().pattern(/^\d{10}$/).required().messages({
+      'string.pattern.base': 'Phone must be exactly 10 digits',
+    }),
+    otherwise: Joi.string().optional(),
+  }),
+  organizationName: Joi.string().trim().when('role', { is: 'organizer', then: Joi.required() }),
   companyName: Joi.string().when('role', { is: 'exhibitor', then: Joi.required() }),
   profileImage: Joi.string().optional(),
   coverImage: Joi.string().optional(),

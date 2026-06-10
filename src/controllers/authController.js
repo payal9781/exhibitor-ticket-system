@@ -35,13 +35,25 @@ const register = asyncHandler(async (req, res) => {
   }
 
   // Check if user already exists
-  const existingUser = await Model.findOne({ email: userData.email });
+  const existingUser = await Model.findOne({ email: userData.email, isDeleted: { $ne: true } });
   if (existingUser) {
     return errorResponse(res, 'User with this email already exists', 409);
   }
 
+  if (role === 'organizer' && userData.phone) {
+    const existingPhone = await Organizer.findOne({ phone: userData.phone, isDeleted: { $ne: true } });
+    if (existingPhone) {
+      return errorResponse(res, 'An organizer with this phone number already exists', 409);
+    }
+  }
+
   try {
-    const user = new Model(userData);
+    const registrationPayload = { ...userData };
+    if (role === 'organizer') {
+      registrationPayload.isActive = false;
+    }
+
+    const user = new Model(registrationPayload);
     const payload = {
       name: String(userData.name).trim(),
       email: userData.email,
@@ -65,26 +77,46 @@ const register = asyncHandler(async (req, res) => {
     }
 
     await user.save();
-    const token = user.generateAccessToken();
 
-    // Send welcome email with credentials
-    try {
-      const emailService = require('../services/emailService');
-      await emailService.sendWelcomeEmail(
-        user.name || userData.name,
-        user.email,
-        userData.password
-      );
-      console.log(`Welcome email sent to: ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send welcome email:', emailError);
-      // We don't want to fail the whole registration if only the email fails,
-      // but we log it for debugging.
+    if (role === 'organizer') {
+      const organizerNotificationService = require('../services/organizerNotificationService');
+      try {
+        await organizerNotificationService.notifyOrganizerRegistrationPending({
+          name: user.name || userData.name,
+          email: user.email,
+          phone: user.phone || userData.phone,
+          organizationName: user.organizationName || userData.organizationName,
+        });
+      } catch (notifyError) {
+        console.error('Failed to send organizer registration notifications:', notifyError);
+      }
+    } else {
+      try {
+        const emailService = require('../services/emailService');
+        await emailService.sendWelcomeEmail(
+          user.name || userData.name,
+          user.email,
+          userData.password
+        );
+        console.log(`Welcome email sent to: ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+      }
     }
 
     const userResponse = user.toObject();
     delete userResponse.password;
     userResponse.role = role;
+
+    if (role === 'organizer') {
+      return successResponse(res, {
+        user: userResponse,
+        pendingApproval: true,
+        message: 'Registration successful. Your account is pending admin approval. You will receive an email when your account is activated.',
+      }, 201);
+    }
+
+    const token = user.generateAccessToken();
     successResponse(res, { user: userResponse, token }, 201);
   } catch (error) {
     if (error.code === 11000) {
@@ -205,6 +237,9 @@ const login = asyncHandler(async (req, res) => {
 
   // Check if user is active
   if (user.isActive === false) {
+    if (role === 'organizer') {
+      return errorResponse(res, 'Your organizer account is pending approval or has been deactivated. Please wait for a super admin to activate your account.', 403);
+    }
     return errorResponse(res, 'Your account has been deactivated. Please contact support.', 403);
   }
 

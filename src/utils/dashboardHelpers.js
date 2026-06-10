@@ -1,14 +1,24 @@
 const { resolveApprovalStatus } = require('../services/approvalService');
 const { isEventRegistrationClosed } = require('../utils/eventDateUtils');
 
+function parseDateOnlyStart(dateStr) {
+  if (!dateStr) return null;
+  const [y, m, d] = String(dateStr).split('T')[0].split('-').map(Number);
+  if (!y || !m || !d) return new Date(dateStr);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+function parseDateOnlyEnd(dateStr) {
+  if (!dateStr) return null;
+  const [y, m, d] = String(dateStr).split('T')[0].split('-').map(Number);
+  if (!y || !m || !d) return new Date(dateStr);
+  return new Date(y, m - 1, d, 23, 59, 59, 999);
+}
+
 function buildDateFilter(startDate, endDate) {
   const dateFilter = {};
-  if (startDate) dateFilter.$gte = new Date(startDate);
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    dateFilter.$lte = end;
-  }
+  if (startDate) dateFilter.$gte = parseDateOnlyStart(startDate);
+  if (endDate) dateFilter.$lte = parseDateOnlyEnd(endDate);
   return dateFilter;
 }
 
@@ -102,6 +112,8 @@ function getRunningAndRecentEvents(events, { runningLimit = 6, recentLimit = 6 }
 }
 
 module.exports = {
+  parseDateOnlyStart,
+  parseDateOnlyEnd,
   buildDateFilter,
   computeEventStatus,
   summarizeEvent,

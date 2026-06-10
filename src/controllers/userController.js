@@ -3,6 +3,20 @@ const asyncHandler = require('../utils/asyncHandler');
 const { response } = require('../utils/apiResponse');
 const { models } = require('../models/z-index');
 const { generateQRCode } = require('../services/qrCodeService');
+const organizerNotificationService = require('../services/organizerNotificationService');
+
+const notifyOrganizerActivated = async (user, modelName, wasActive) => {
+  if (modelName !== 'Organizer' || wasActive || !user.isActive || !user.email) return;
+  try {
+    await organizerNotificationService.notifyOrganizerAccountActivated({
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+    });
+  } catch (error) {
+    console.error('Failed to send organizer activation notifications:', error);
+  }
+};
 
 const registerForEvent = asyncHandler(async (req, res) => {
   const { eventId } = req.body;
@@ -275,20 +289,20 @@ const getUsers = asyncHandler(async (req, res) => {
   if (role && role !== 'all') {
     const Model = models[role.charAt(0).toUpperCase() + role.slice(1)];
     if (Model) {
-      const rawUsers = await Model.find(query);
+      const rawUsers = await Model.find(query).sort({ createdAt: -1 });
       users = rawUsers.map(u => transformUser(u.toObject(), role));
     }
   } else {
     // Get users from all models
-    const exhibitors = await models.Exhibitor.find(query);
-    const visitors = await models.Visitor.find(query);
-    const organizers = await models.Organizer.find(query);
-    
+    const exhibitors = await models.Exhibitor.find(query).sort({ createdAt: -1 });
+    const visitors = await models.Visitor.find(query).sort({ createdAt: -1 });
+    const organizers = await models.Organizer.find(query).sort({ createdAt: -1 });
+
     users = [
       ...exhibitors.map(u => transformUser(u.toObject(), 'exhibitor')),
       ...visitors.map(u => transformUser(u.toObject(), 'visitor')),
       ...organizers.map(u => transformUser(u.toObject(), 'organizer'))
-    ];
+    ].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   }
 
   return response.success('Users retrieved successfully', users, res);
@@ -389,16 +403,17 @@ const changeUserStatus = asyncHandler(async (req, res) => {
   const models_to_check = ['Exhibitor', 'Visitor', 'Organizer'];
   for (const modelName of models_to_check) {
     const Model = models[modelName];
-    const foundUser = await Model.findOneAndUpdate(
-      { _id: id, isDeleted: false },
-      { isActive: status === 'active' },
-      { new: true }
-    );
-    if (foundUser) {
-      user = foundUser;
-      userRole = modelName.toLowerCase();
-      break;
-    }
+    const existingUser = await Model.findOne({ _id: id, isDeleted: false });
+    if (!existingUser) continue;
+
+    const wasActive = existingUser.isActive;
+    existingUser.isActive = status === 'active';
+    await existingUser.save();
+    await notifyOrganizerActivated(existingUser, modelName, wasActive);
+
+    user = existingUser;
+    userRole = modelName.toLowerCase();
+    break;
   }
   
   if (!user) {
@@ -454,18 +469,17 @@ const bulkUpdateUserStatus = asyncHandler(async (req, res) => {
   
   const isActive = status === 'active';
   const updatedUsers = [];
-  
+
   const models_to_check = ['Exhibitor', 'Visitor', 'Organizer'];
   for (const modelName of models_to_check) {
     const Model = models[modelName];
-    const users = await Model.updateMany(
-      { _id: { $in: userIds }, isDeleted: false },
-      { isActive },
-      { new: true }
-    );
-    if (users.modifiedCount > 0) {
-      const updatedDocs = await Model.find({ _id: { $in: userIds }, isDeleted: false });
-      updatedUsers.push(...updatedDocs.map(u => ({ ...u.toObject(), role: modelName.toLowerCase() })));
+    const docs = await Model.find({ _id: { $in: userIds }, isDeleted: false });
+    for (const doc of docs) {
+      const wasActive = doc.isActive;
+      doc.isActive = isActive;
+      await doc.save();
+      await notifyOrganizerActivated(doc, modelName, wasActive);
+      updatedUsers.push({ ...doc.toObject(), role: modelName.toLowerCase() });
     }
   }
   
